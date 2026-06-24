@@ -14,6 +14,8 @@ export interface FigmaDocument {
   document: FigmaNode; // root (DOCUMENT) whose children are CANVAS (pages)
   components?: Record<string, { key: string; name: string; componentSetId?: string }>;
   componentSets?: Record<string, { key: string; name: string }>;
+  version?: string;       // Figma file version (changes on every edit)
+  lastModified?: string;  // ISO timestamp
 }
 
 export interface FigmaStyles {

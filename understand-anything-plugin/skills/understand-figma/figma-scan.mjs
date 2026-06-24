@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { parseFileKey, FigmaApiSource, parseDocument, extractTokens } from "@understand-anything/core/figma";
 
@@ -12,6 +12,21 @@ if (!projectRoot || !urlOrKey) {
 const fileKey = parseFileKey(urlOrKey);
 const source = new FigmaApiSource(fileKey); // reads FIGMA_TOKEN from env; throws a friendly error if missing
 const doc = await source.fetchDocument();
+
+const metaPath = join(projectRoot, ".understand-anything", "meta.json");
+let prevVersion = null;
+if (existsSync(metaPath)) {
+  try {
+    prevVersion = JSON.parse(readFileSync(metaPath, "utf8")).figmaVersion ?? null;
+  } catch {
+    prevVersion = null; // malformed/partial meta.json → fall through to a full rebuild
+  }
+}
+if (doc.version && prevVersion === doc.version && process.env.UNDERSTAND_FIGMA_FORCE !== "1") {
+  console.error("UP_TO_DATE");
+  process.exit(0);
+}
+
 const styles = await source.fetchStyles().catch(() => ({ meta: { styles: [] } }));
 
 const structural = parseDocument(doc, fileKey);
@@ -42,6 +57,7 @@ const manifest = {
     gitCommitHash: "",
   },
   fileKey,
+  figmaVersion: doc.version ?? "",
   nodes,
   edges,
 };

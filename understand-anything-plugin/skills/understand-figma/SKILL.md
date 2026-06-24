@@ -36,6 +36,8 @@ FIGMA_TOKEN="$FIGMA_TOKEN" node <SKILL_DIR>/figma-scan.mjs "$PROJECT_ROOT" "<url
 
 It writes `.understand-anything/intermediate/scan-manifest.json` and prints the node counts. Relay the counts to the user. If it exits non-zero, relay stderr and STOP.
 
+> If the scan prints `UP_TO_DATE`, report "Design graph is already up to date for this Figma file version" and STOP. To force a full rebuild, re-run with `UNDERSTAND_FIGMA_FORCE=1` set in the environment.
+
 ## Phase 2 — ANALYZE (LLM enrichment)
 
 1. Read `scan-manifest.json`. Group nodes into batches of ~15, grouped by page when possible.

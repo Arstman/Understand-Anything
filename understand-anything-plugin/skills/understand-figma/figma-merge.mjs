@@ -25,6 +25,7 @@ writeFileSync(join(outDir, "knowledge-graph.json"), JSON.stringify(result.data, 
 writeFileSync(join(outDir, "meta.json"), JSON.stringify({
   lastAnalyzedAt: new Date().toISOString(),
   gitCommitHash: "",
+  figmaVersion: manifest.figmaVersion ?? "",
   version: "1.0.0",
   analyzedFiles: result.data.nodes.length,
 }, null, 2));
