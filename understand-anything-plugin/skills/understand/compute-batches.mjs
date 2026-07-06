@@ -226,6 +226,14 @@ function buildBatchOfMap(allBatches) {
   return m;
 }
 
+function normalizeRelativePathForMatch(pathText) {
+  return pathText
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\.\/+/, '')
+    .replace(/\/+/g, '/');
+}
+
 /**
  * Returns Map<path, communityId> via Louvain. May throw — caller must catch
  * and fall back if it does. Honors UA_COMPUTE_BATCHES_FORCE_LOUVAIN_THROW=1
@@ -355,7 +363,7 @@ async function main() {
       }
       const lines = content
         .split('\n')
-        .map(s => s.trim())
+        .map(normalizeRelativePathForMatch)
         .filter(Boolean);
       changedFiles = new Set(lines);
     }
@@ -480,15 +488,18 @@ async function main() {
 
   const MAX_NEIGHBORS = 50;
 
-  // Second-pass: enrich each batch with batchImportData + neighborMap
-  const batches = mergedBareBatches.map(b => {
-    const batchPaths = new Set(b.files.map(f => f.path));
+  // Second-pass: enrich each batch with batchImportData + neighborMap.
+  // `analysisFiles` is usually the full batch. In --changed-files mode, it is
+  // only the changed target set, while batchOf remains the full-graph lookup.
+  const buildBatchPayload = (b, analysisFiles = b.files) => {
+    const analysisPaths = new Set(analysisFiles.map(f => f.path));
     const batchImportData = {};
     const neighborMap = {};
-    for (const f of b.files) {
+    for (const f of analysisFiles) {
       batchImportData[f.path] = (importMap[f.path] || []).slice();
 
-      // 1-hop neighbors: imports out + imported-by in, excluding same batch.
+      // 1-hop neighbors: imports out + imported-by in, excluding files already
+      // emitted for analysis in this payload.
       // Note on truncation: we measure "popularity" by total raw 1-hop neighbor
       // count (rawCount), not kept.length. A widely-imported hub like a logger
       // module may have N>50 inbound imports but, after Louvain + size
@@ -500,7 +511,7 @@ async function main() {
       const inNeighbors = reverseImportMap.get(f.path) || [];
       const all = new Set([...outNeighbors, ...inNeighbors]);
       const rawCount = all.size;
-      const filtered = [...all].filter(p => batchOf.has(p) && !batchPaths.has(p));
+      const filtered = [...all].filter(p => batchOf.has(p) && !analysisPaths.has(p));
 
       let kept = filtered.map(p => ({
         path: p,
@@ -523,12 +534,21 @@ async function main() {
 
       if (kept.length) neighborMap[f.path] = kept;
     }
-    return { batchIndex: b.batchIndex, files: b.files, batchImportData, neighborMap };
-  });
+    return { batchIndex: b.batchIndex, files: analysisFiles, batchImportData, neighborMap };
+  };
+
+  const batches = mergedBareBatches.map(b => buildBatchPayload(b));
 
   let finalBatches = batches;
   if (changedFiles) {
-    finalBatches = batches.filter(b => b.files.some(f => changedFiles.has(f.path)));
+    finalBatches = mergedBareBatches
+      .map(b => {
+        const changedBatchFiles = b.files.filter(f =>
+          changedFiles.has(normalizeRelativePathForMatch(f.path)));
+        if (changedBatchFiles.length === 0) return null;
+        return buildBatchPayload(b, changedBatchFiles);
+      })
+      .filter(Boolean);
     // batchIndex on filtered batches retains the full-graph assignment
     // (the design says neighborMap should still reference unchanged files'
     // full-graph batchIndex). No renumbering.
