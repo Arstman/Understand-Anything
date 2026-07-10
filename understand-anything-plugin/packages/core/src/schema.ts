@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// Edge types (35 values across 8 categories)
+// Edge types (38 values across 9 categories)
 export const EdgeTypeSchema = z.enum([
   "imports", "exports", "contains", "inherits", "implements",  // Structural
   "calls", "subscribes", "publishes", "middleware",             // Behavioral
@@ -72,9 +72,12 @@ export const NODE_TYPE_ALIASES: Record<string, string> = {
   reference: "source",
   raw: "source",
   paper: "source",
-  // Design aliases (Figma node types). NOTE: the former `page: "article"`
-  // entry was removed — `page` is now a first-class design node type, so it
-  // must not be rewritten (and `canvas: "page"` would otherwise chain).
+};
+
+// Design aliases (Figma node types) — applied only when the graph's kind is
+// "design". Terms like "page" and "style" mean something else in other
+// kinds, so these must not leak into them (see NON_DESIGN_NODE_TYPE_ALIASES).
+export const DESIGN_NODE_TYPE_ALIASES: Record<string, string> = {
   frame: "screen",
   artboard: "screen",
   canvas: "page",
@@ -87,6 +90,14 @@ export const NODE_TYPE_ALIASES: Record<string, string> = {
   componentset: "componentSet",
   design_token: "token",
   style: "token",
+};
+
+// Applied to every non-design kind: `page` is a first-class *design* node
+// type, but knowledge/codebase graphs relied on it normalizing to "article"
+// (see 2fc85e6) — the sanitizer can't tell a wiki page from a Figma page,
+// so the graph's `kind` decides which table wins.
+export const NON_DESIGN_NODE_TYPE_ALIASES: Record<string, string> = {
+  page: "article",
 };
 
 // Aliases that LLMs commonly generate instead of canonical edge types
@@ -133,16 +144,24 @@ export const EDGE_TYPE_ALIASES: Record<string, string> = {
   tagged_with: "categorized_under",
   written_by: "authored_by",
   created_by: "authored_by",
-  // Design aliases
+  // Note: "implemented_by" is intentionally NOT aliased to "implements" —
+  // it inverts edge direction (see commit fd0df15). The LLM should use
+  // "implements" with correct source/target instead.
+};
+
+// Design edge aliases — applied only when the graph's kind is "design".
+export const DESIGN_EDGE_TYPE_ALIASES: Record<string, string> = {
   instantiates: "instance_of",
   variant: "variant_of",
   styled_by: "uses_token",
   applies_token: "uses_token",
-  // NOTE: the former `instance_of: "exemplifies"` entry is removed —
-  // instance_of is now a first-class design edge.
-  // Note: "implemented_by" is intentionally NOT aliased to "implements" —
-  // it inverts edge direction (see commit fd0df15). The LLM should use
-  // "implements" with correct source/target instead.
+};
+
+// Applied to every non-design kind: `instance_of` is a first-class design
+// edge, but knowledge graphs relied on it normalizing to "exemplifies"
+// ("X is an instance of Y" — see 2fc85e6).
+export const NON_DESIGN_EDGE_TYPE_ALIASES: Record<string, string> = {
+  instance_of: "exemplifies",
 };
 
 // Aliases for complexity values LLMs commonly generate
@@ -500,15 +519,25 @@ export function normalizeGraph(data: unknown): unknown {
   const d = data as Record<string, unknown>;
   const result = { ...d };
 
+  // "page" and "instance_of" are canonical design types but alias *sources*
+  // in every other kind, so the active alias tables depend on the graph's kind.
+  const isDesign = typeof d.kind === "string" && d.kind.toLowerCase() === "design";
+  const nodeAliases: Record<string, string> = isDesign
+    ? { ...NODE_TYPE_ALIASES, ...DESIGN_NODE_TYPE_ALIASES }
+    : { ...NODE_TYPE_ALIASES, ...NON_DESIGN_NODE_TYPE_ALIASES };
+  const edgeAliases: Record<string, string> = isDesign
+    ? { ...EDGE_TYPE_ALIASES, ...DESIGN_EDGE_TYPE_ALIASES }
+    : { ...EDGE_TYPE_ALIASES, ...NON_DESIGN_EDGE_TYPE_ALIASES };
+
   if (Array.isArray(d.nodes)) {
     result.nodes = (d.nodes as Array<Record<string, unknown>>).map((node) => {
       if (
         typeof node === "object" &&
         node !== null &&
         typeof node.type === "string" &&
-        node.type in NODE_TYPE_ALIASES
+        node.type in nodeAliases
       ) {
-        return { ...node, type: NODE_TYPE_ALIASES[node.type] };
+        return { ...node, type: nodeAliases[node.type] };
       }
       return node;
     });
@@ -520,9 +549,9 @@ export function normalizeGraph(data: unknown): unknown {
         typeof edge === "object" &&
         edge !== null &&
         typeof edge.type === "string" &&
-        edge.type in EDGE_TYPE_ALIASES
+        edge.type in edgeAliases
       ) {
-        return { ...edge, type: EDGE_TYPE_ALIASES[edge.type] };
+        return { ...edge, type: edgeAliases[edge.type] };
       }
       return edge;
     });

@@ -7,7 +7,7 @@ export type NodeType =
   | "article" | "entity" | "topic" | "claim" | "source"
   | "page" | "screen" | "component" | "componentSet" | "instance" | "token";
 
-// Edge types (35 total in 8 categories: Structural, Behavioral, Data flow, Dependencies, Semantic, Infrastructure/Schema, Domain, Knowledge)
+// Edge types (38 total in 9 categories: Structural, Behavioral, Data flow, Dependencies, Semantic, Infrastructure/Schema, Domain, Knowledge, Design)
 export type EdgeType =
   | "imports" | "exports" | "contains" | "inherits" | "implements"  // Structural
   | "calls" | "subscribes" | "publishes" | "middleware"              // Behavioral
@@ -18,8 +18,7 @@ export type EdgeType =
   | "migrates" | "documents" | "routes" | "defines_schema"          // Schema/Data
   | "contains_flow" | "flow_step" | "cross_domain"                  // Domain
   | "cites" | "contradicts" | "builds_on" | "exemplifies" | "categorized_under" | "authored_by" // Knowledge
-  // Design (3 new → 38 total)
-  | "instance_of" | "variant_of" | "uses_token";
+  | "instance_of" | "variant_of" | "uses_token"; // Design
 
 // Optional knowledge metadata for article/entity/topic/claim/source nodes
 export interface KnowledgeMeta {

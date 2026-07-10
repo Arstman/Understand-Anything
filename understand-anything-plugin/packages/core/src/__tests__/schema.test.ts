@@ -781,3 +781,56 @@ describe("design graph schema", () => {
     expect(res.data!.edges.some((e) => e.target === "componentSet:7:8" && e.type === "variant_of")).toBe(true);
   });
 });
+
+// `page` and `instance_of` are canonical design types, but every other kind
+// relied on them normalizing to knowledge types (page → article, instance_of
+// → exemplifies) before the design kind existed. The alias tables are
+// kind-scoped so promoting them for design graphs doesn't regress the rest.
+describe("kind-aware alias normalization", () => {
+  function knowledgeGraph(kind?: string) {
+    return {
+      version: "1.0.0",
+      ...(kind ? { kind } : {}),
+      project: { name: "K", languages: ["markdown"], frameworks: [], description: "d", analyzedAt: "t", gitCommitHash: "" },
+      nodes: [
+        { id: "article:home", type: "page", name: "Home", summary: "s", tags: ["wiki"], complexity: "simple" },
+        { id: "entity:gpt", type: "entity", name: "GPT", summary: "s", tags: ["model"], complexity: "simple" },
+        { id: "topic:llm", type: "topic", name: "LLMs", summary: "s", tags: ["topic"], complexity: "simple" },
+      ],
+      edges: [
+        { source: "entity:gpt", target: "topic:llm", type: "instance_of", direction: "forward", weight: 0.7 },
+      ],
+      layers: [],
+      tour: [],
+    };
+  }
+
+  it('rewrites page → article and instance_of → exemplifies for kind:"knowledge"', () => {
+    const res = validateGraph(knowledgeGraph("knowledge"));
+    expect(res.success).toBe(true);
+    expect(res.data!.nodes.find((n) => n.id === "article:home")!.type).toBe("article");
+    expect(res.data!.edges[0].type).toBe("exemplifies");
+  });
+
+  it("rewrites page → article for graphs without a kind (pre-design behavior)", () => {
+    const res = validateGraph(knowledgeGraph());
+    expect(res.success).toBe(true);
+    expect(res.data!.nodes.find((n) => n.id === "article:home")!.type).toBe("article");
+    expect(res.data!.edges[0].type).toBe("exemplifies");
+  });
+
+  it('keeps page and instance_of first-class for kind:"design"', () => {
+    const g = designGraph();
+    g.nodes.push({ id: "page:1:0", type: "page", name: "Onboarding", summary: "s", tags: ["page"], complexity: "simple" });
+    const res = validateGraph(g);
+    expect(res.data!.nodes.find((n) => n.id === "page:1:0")!.type).toBe("page");
+    expect(res.data!.edges.find((x) => x.source === "instance:5:6")!.type).toBe("instance_of");
+  });
+
+  it('applies design aliases (styled_by → uses_token) only to design graphs', () => {
+    const g = designGraph();
+    g.edges.push({ source: "screen:1:2", target: "token:color:brand", type: "styled_by", direction: "forward", weight: 0.5 });
+    const res = validateGraph(g);
+    expect(res.data!.edges.some((e) => e.source === "screen:1:2" && e.type === "uses_token")).toBe(true);
+  });
+});
