@@ -109,6 +109,12 @@ async function main() {
 
     const { analysis, callGraph, structureOutcome, callGraphOutcome } =
       analyzeFileWithOutcomes(registry, file, content);
+
+    if (structureOutcome === 'skipped') {
+      filesSkipped.push(file.path);
+      continue;
+    }
+
     analysisOutcomes.structure[structureOutcome] += 1;
     analysisOutcomes.callGraph[callGraphOutcome] += 1;
 

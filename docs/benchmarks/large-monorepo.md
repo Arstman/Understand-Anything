@@ -76,7 +76,10 @@ Structure diagnostics are bounded across the whole run, rather than once per
 batch. The report retains deterministic samples and aggregate success, failure,
 and skip counts, but discards raw per-worker stdout and stderr after those
 summaries are formed. Structural coverage counts successful structure analyses;
-failed analyses remain failures instead of being reported as skipped work.
+files without a registered structural parser are accounted in `filesSkipped`
+and produce a degraded report. Missing optional call-graph capability is also
+skipped. After a parser advertises a capability, an exception or invalid result
+remains an integrity failure instead of being reported as skipped work.
 
 `--keep-artifacts` preserves intermediate files and prints their location.
 Those private files contain absolute paths and detailed structural data; do not
