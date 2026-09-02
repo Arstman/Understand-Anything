@@ -12,7 +12,7 @@ const workflow = readFileSync(
 
 describe("demo data publication workflow", () => {
   it("is manual and binds authorization to exact live main", () => {
-    expect(workflow).toMatch(/^on:\n {2}workflow_dispatch:/m);
+    expect(workflow).toMatch(/^on:\r?\n {2}workflow_dispatch:/m);
     expect(workflow).not.toMatch(/^ {2}(push|pull_request|schedule):/m);
     expect(workflow).toContain('GITHUB_REF" != "refs/heads/main');
     expect(workflow).toContain('CANDIDATE_SHA" == "$GITHUB_SHA');
