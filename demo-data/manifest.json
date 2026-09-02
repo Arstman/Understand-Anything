@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "dataset": {
+    "repository": "Lum1104/microservices-demo",
+    "commit": "f0120e4544c41104f0d9b45d320764f1b1148fe4",
+    "path": ".understand-anything",
+    "analyzedCommit": "c9857ee54fba10486013f15ba6b31411986f530c"
+  },
+  "files": [
+    {
+      "filename": "knowledge-graph.json",
+      "bytes": 328640,
+      "sha256": "f17e433f394b5c1ab0826a7f619d28968d145fbc9f7df552f1853558dce9388d",
+      "contentType": "application/json",
+      "cacheControl": "public,max-age=3600,must-revalidate"
+    },
+    {
+      "filename": "domain-graph.json",
+      "bytes": 44806,
+      "sha256": "061119b1edfd7d97611d1e02c7160e4d2409958f504de784850328b65a51177f",
+      "contentType": "application/json",
+      "cacheControl": "public,max-age=3600,must-revalidate"
+    },
+    {
+      "filename": "meta.json",
+      "bytes": 159,
+      "sha256": "1f03fcca2a58f0929ebbc15ba57c54c5da177bcac1abd422fd7db34f8dbd84ff",
+      "contentType": "application/json",
+      "cacheControl": "public,max-age=3600,must-revalidate"
+    }
+  ]
+}

@@ -1,0 +1,856 @@
+{
+  "version": "1.0.0",
+  "project": {
+    "name": "microservices-demo",
+    "languages": ["Go", "C#", "Java", "Python", "Node.js"],
+    "frameworks": ["gRPC", "Gorilla Mux", "ASP.NET", "Flask", "Locust", "Jinja2", "LangChain"],
+    "description": "Online Boutique is a cloud-first microservices e-commerce demo application by Google, featuring 11 microservices that communicate over gRPC. Users can browse products, add them to a cart, and complete purchases with simulated payment processing, shipping, and email confirmation.",
+    "analyzedAt": "2026-04-14T00:00:00Z",
+    "gitCommitHash": "c9857ee54fba10486013f15ba6b31411986f530c"
+  },
+  "nodes": [
+    {
+      "id": "domain:product-catalog",
+      "type": "domain",
+      "name": "Product Catalog",
+      "summary": "Manages the product inventory including listing, searching, and retrieving individual product details. Serves as one of the most depended-upon services, referenced by the frontend, checkout, and recommendation services.",
+      "tags": ["catalog", "products", "inventory"],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entities": ["Product", "ListProductsResponse", "SearchProductsResponse"],
+        "businessRules": ["Products loaded from JSON file or AlloyDB", "Search matches against product names and descriptions", "Returns NOT_FOUND for missing product IDs"],
+        "crossDomainInteractions": ["Checkout service retrieves product prices during order placement", "Recommendation service queries full catalog to generate suggestions", "Frontend fetches product listings and details for display"]
+      }
+    },
+    {
+      "id": "domain:shopping-cart",
+      "type": "domain",
+      "name": "Shopping Cart",
+      "summary": "Handles cart state management for users, supporting adding items, retrieving cart contents, and emptying the cart. Supports multiple storage backends (Redis, Spanner, AlloyDB) via a strategy pattern.",
+      "tags": ["cart", "shopping", "state-management"],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entities": ["Cart", "CartItem", "ICartStore"],
+        "businessRules": ["Cart items identified by user session ID and product ID", "Quantity constraints enforced (1-10 per add)", "Cart emptied after successful checkout"],
+        "crossDomainInteractions": ["Frontend adds/removes items and displays cart", "Checkout service retrieves cart contents during order placement"]
+      }
+    },
+    {
+      "id": "domain:checkout-and-ordering",
+      "type": "domain",
+      "name": "Checkout and Ordering",
+      "summary": "Orchestrates the entire purchase flow by coordinating six downstream microservices: cart retrieval, product lookup, currency conversion, shipping calculation, payment charging, and email confirmation. This is the most complex business logic in the system.",
+      "tags": ["checkout", "ordering", "orchestration", "purchase"],
+      "complexity": "complex",
+      "domainMeta": {
+        "entities": ["Order", "OrderResult", "OrderItem", "PlaceOrderRequest"],
+        "businessRules": ["All downstream calls must succeed for order to complete", "Cart is emptied after successful order", "Shipping cost and item prices converted to user's preferred currency"],
+        "crossDomainInteractions": ["Calls cart service to retrieve items", "Calls product catalog for prices", "Calls currency service for conversion", "Calls shipping service for quote", "Calls payment service to charge", "Calls email service for confirmation"]
+      }
+    },
+    {
+      "id": "domain:payment-processing",
+      "type": "domain",
+      "name": "Payment Processing",
+      "summary": "Provides simulated credit card payment processing. Validates card numbers (VISA/MasterCard only), checks expiration dates, and returns a UUID transaction ID for successful charges.",
+      "tags": ["payment", "credit-card", "transaction"],
+      "complexity": "simple",
+      "domainMeta": {
+        "entities": ["CreditCardInfo", "ChargeRequest", "ChargeResponse"],
+        "businessRules": ["Only VISA and MasterCard numbers accepted", "Card expiration date must be in the future", "Returns UUID transaction ID on success"],
+        "crossDomainInteractions": ["Called by checkout service during order placement"]
+      }
+    },
+    {
+      "id": "domain:shipping",
+      "type": "domain",
+      "name": "Shipping",
+      "summary": "Calculates shipping quotes based on item count and simulates order shipment by generating tracking IDs. Uses a flat-rate pricing model ($8.99 for any non-empty order).",
+      "tags": ["shipping", "logistics", "tracking"],
+      "complexity": "simple",
+      "domainMeta": {
+        "entities": ["ShipOrderRequest", "ShipOrderResponse", "ShippingQuote"],
+        "businessRules": ["Flat $8.99 shipping for any non-zero item count", "$0 shipping for empty orders", "Tracking ID generated from address hash with random components"],
+        "crossDomainInteractions": ["Called by checkout service for shipping cost and shipment", "Called by frontend to display shipping estimate in cart view"]
+      }
+    },
+    {
+      "id": "domain:currency-conversion",
+      "type": "domain",
+      "name": "Currency Conversion",
+      "summary": "Converts monetary amounts between supported currencies using exchange rate data. Normalizes all conversions through EUR as an intermediate currency.",
+      "tags": ["currency", "conversion", "money", "internationalization"],
+      "complexity": "simple",
+      "domainMeta": {
+        "entities": ["Money", "CurrencyConversionRequest", "GetSupportedCurrenciesResponse"],
+        "businessRules": ["All conversions normalize through EUR first", "Supports listing all available currencies", "Proper handling of nanos overflow in money arithmetic"],
+        "crossDomainInteractions": ["Called by frontend to display prices in user's preferred currency", "Called by checkout service during order total calculation"]
+      }
+    },
+    {
+      "id": "domain:email-notifications",
+      "type": "domain",
+      "name": "Email Notifications",
+      "summary": "Sends order confirmation emails using Jinja2 HTML templates. Supports a dummy mode for development that logs confirmation details instead of sending real emails.",
+      "tags": ["email", "notifications", "order-confirmation"],
+      "complexity": "simple",
+      "domainMeta": {
+        "entities": ["SendOrderConfirmationRequest", "OrderResult"],
+        "businessRules": ["Renders order confirmation using Jinja2 templates", "DummyEmailService logs instead of sending in development", "Cloud mail client for production (currently unimplemented)"],
+        "crossDomainInteractions": ["Called by checkout service after successful payment"]
+      }
+    },
+    {
+      "id": "domain:recommendations",
+      "type": "domain",
+      "name": "Recommendations",
+      "summary": "Provides product recommendations by querying the full product catalog, filtering out items the user has already viewed, and returning a random sample of up to 5 alternatives.",
+      "tags": ["recommendations", "personalization", "discovery"],
+      "complexity": "simple",
+      "domainMeta": {
+        "entities": ["ListRecommendationsRequest", "ListRecommendationsResponse"],
+        "businessRules": ["Excludes products the user has already viewed", "Returns up to 5 random product recommendations", "Read-only service that does not modify state"],
+        "crossDomainInteractions": ["Queries product catalog service for full product list", "Called by frontend for home page and product detail page suggestions"]
+      }
+    },
+    {
+      "id": "domain:advertising",
+      "type": "domain",
+      "name": "Advertising",
+      "summary": "Serves contextual advertisements based on product category keys. Maintains an in-memory map of category-to-ad mappings and falls back to random ads when no category match is found.",
+      "tags": ["ads", "advertising", "contextual"],
+      "complexity": "simple",
+      "domainMeta": {
+        "entities": ["Ad", "AdRequest", "AdResponse"],
+        "businessRules": ["Ads matched by product category context keys", "Falls back to random ads if no category match", "Hardcoded ad entries for known product categories"],
+        "crossDomainInteractions": ["Called by frontend to display ads on home and product pages"]
+      }
+    },
+    {
+      "id": "domain:shopping-assistant",
+      "type": "domain",
+      "name": "Shopping Assistant",
+      "summary": "AI-powered shopping assistant implementing a RAG pipeline that uses Gemini vision to analyze room images, performs vector similarity search against product embeddings in AlloyDB, and returns interior design product recommendations.",
+      "tags": ["ai", "chatbot", "gemini", "rag", "assistant"],
+      "complexity": "complex",
+      "domainMeta": {
+        "entities": ["ChatMessage", "ProductEmbedding", "PackagingInfo"],
+        "businessRules": ["Three-step RAG pipeline: image analysis, vector search, response generation", "Uses Gemini vision model for room image analysis", "Vector similarity search on AlloyDB product embeddings"],
+        "crossDomainInteractions": ["Called by frontend chatbot handler", "Queries AlloyDB for product embeddings"]
+      }
+    },
+
+    {
+      "id": "flow:browse-products",
+      "type": "flow",
+      "name": "Browse Products",
+      "summary": "User browses the product catalog on the home page, viewing product listings with prices converted to their preferred currency, along with contextual ads.",
+      "tags": ["browsing", "home-page", "product-listing"],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "GET /",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:view-product-details",
+      "type": "flow",
+      "name": "View Product Details",
+      "summary": "User views a specific product's detail page including price in preferred currency, product recommendations, contextual ads, and optionally interacts with the AI shopping assistant.",
+      "tags": ["product-detail", "recommendations"],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "GET /product/{id}",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:manage-cart",
+      "type": "flow",
+      "name": "Manage Shopping Cart",
+      "summary": "User adds products to their cart, views cart contents with resolved product details and shipping estimates, and can empty the cart.",
+      "tags": ["cart", "add-to-cart", "view-cart"],
+      "complexity": "moderate",
+      "domainMeta": {
+        "entryPoint": "POST /cart and GET /cart",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:checkout-purchase",
+      "type": "flow",
+      "name": "Checkout and Purchase",
+      "summary": "User submits payment and shipping information to complete a purchase. The checkout service orchestrates cart retrieval, price lookup, currency conversion, shipping calculation, payment charging, cart emptying, and email confirmation.",
+      "tags": ["checkout", "purchase", "order", "payment"],
+      "complexity": "complex",
+      "domainMeta": {
+        "entryPoint": "POST /cart/checkout",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:set-currency",
+      "type": "flow",
+      "name": "Set Currency Preference",
+      "summary": "User selects a preferred display currency which is stored as a cookie and applied to all subsequent price displays across the application.",
+      "tags": ["currency", "preference", "internationalization"],
+      "complexity": "simple",
+      "domainMeta": {
+        "entryPoint": "POST /setCurrency",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:get-recommendations",
+      "type": "flow",
+      "name": "Get Product Recommendations",
+      "summary": "Recommendation service fetches the full product catalog, excludes already-viewed products, and returns a random sample of up to 5 suggestions displayed on home and product pages.",
+      "tags": ["recommendations", "personalization"],
+      "complexity": "simple",
+      "domainMeta": {
+        "entryPoint": "gRPC ListRecommendations",
+        "entryType": "event"
+      }
+    },
+    {
+      "id": "flow:serve-ads",
+      "type": "flow",
+      "name": "Serve Contextual Ads",
+      "summary": "Ad service receives context keys from the frontend and returns matching advertisements for product categories, falling back to random ads when no match exists.",
+      "tags": ["advertising", "contextual-ads"],
+      "complexity": "simple",
+      "domainMeta": {
+        "entryPoint": "gRPC GetAds",
+        "entryType": "event"
+      }
+    },
+    {
+      "id": "flow:convert-currency",
+      "type": "flow",
+      "name": "Convert Currency",
+      "summary": "Currency service converts monetary amounts between currencies by normalizing through EUR, supporting both individual conversions and listing all supported currencies.",
+      "tags": ["currency", "conversion"],
+      "complexity": "simple",
+      "domainMeta": {
+        "entryPoint": "gRPC Convert / GetSupportedCurrencies",
+        "entryType": "event"
+      }
+    },
+    {
+      "id": "flow:send-order-confirmation",
+      "type": "flow",
+      "name": "Send Order Confirmation Email",
+      "summary": "Email service renders an order confirmation using Jinja2 templates and sends it to the customer (or logs it in development mode).",
+      "tags": ["email", "confirmation", "notification"],
+      "complexity": "simple",
+      "domainMeta": {
+        "entryPoint": "gRPC SendOrderConfirmation",
+        "entryType": "event"
+      }
+    },
+    {
+      "id": "flow:ai-shopping-assistant",
+      "type": "flow",
+      "name": "AI Shopping Assistant Chat",
+      "summary": "User interacts with a chatbot that analyzes room images via Gemini vision, searches product embeddings for matching items, and returns interior design recommendations.",
+      "tags": ["ai", "chatbot", "rag", "gemini"],
+      "complexity": "complex",
+      "domainMeta": {
+        "entryPoint": "POST /chat (frontend) -> gRPC ShoppingAssistant",
+        "entryType": "http"
+      }
+    },
+    {
+      "id": "flow:calculate-shipping",
+      "type": "flow",
+      "name": "Calculate Shipping Quote",
+      "summary": "Shipping service calculates a flat-rate shipping quote based on item count and generates tracking IDs for shipped orders.",
+      "tags": ["shipping", "quote", "tracking"],
+      "complexity": "simple",
+      "domainMeta": {
+        "entryPoint": "gRPC GetQuote / ShipOrder",
+        "entryType": "event"
+      }
+    },
+    {
+      "id": "flow:process-payment",
+      "type": "flow",
+      "name": "Process Payment",
+      "summary": "Payment service validates credit card details (number format, expiration), and returns a transaction ID for the simulated charge.",
+      "tags": ["payment", "credit-card", "validation"],
+      "complexity": "simple",
+      "domainMeta": {
+        "entryPoint": "gRPC Charge",
+        "entryType": "event"
+      }
+    },
+
+    {
+      "id": "step:browse-products:fetch-products",
+      "type": "step",
+      "name": "Fetch Product List",
+      "summary": "Frontend calls ProductCatalogService.ListProducts to retrieve all available products.",
+      "tags": ["catalog", "grpc"],
+      "complexity": "simple",
+      "filePath": "src/frontend/rpc.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:browse-products:fetch-currencies",
+      "type": "step",
+      "name": "Fetch Supported Currencies",
+      "summary": "Frontend calls CurrencyService.GetSupportedCurrencies to populate the currency selector dropdown.",
+      "tags": ["currency", "grpc"],
+      "complexity": "simple",
+      "filePath": "src/frontend/rpc.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:browse-products:convert-prices",
+      "type": "step",
+      "name": "Convert Product Prices",
+      "summary": "Frontend converts each product price to the user's preferred currency via CurrencyService.Convert.",
+      "tags": ["currency", "conversion"],
+      "complexity": "simple",
+      "filePath": "src/frontend/handlers.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:browse-products:fetch-cart-size",
+      "type": "step",
+      "name": "Fetch Cart Item Count",
+      "summary": "Frontend retrieves the user's cart to display the item count badge in the navigation bar.",
+      "tags": ["cart", "grpc"],
+      "complexity": "simple",
+      "filePath": "src/frontend/rpc.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:browse-products:fetch-ads",
+      "type": "step",
+      "name": "Fetch Contextual Ads",
+      "summary": "Frontend calls AdService.GetAds to retrieve advertisements displayed on the home page.",
+      "tags": ["ads", "grpc"],
+      "complexity": "simple",
+      "filePath": "src/frontend/rpc.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:browse-products:render-home",
+      "type": "step",
+      "name": "Render Home Page",
+      "summary": "Frontend assembles all fetched data and renders the home page HTML template with products, prices, cart count, and ads.",
+      "tags": ["rendering", "template"],
+      "complexity": "simple",
+      "filePath": "src/frontend/handlers.go",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:view-product-details:fetch-product",
+      "type": "step",
+      "name": "Fetch Product by ID",
+      "summary": "Frontend calls ProductCatalogService.GetProduct to retrieve the specific product details.",
+      "tags": ["catalog", "grpc"],
+      "complexity": "simple",
+      "filePath": "src/frontend/rpc.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:view-product-details:convert-price",
+      "type": "step",
+      "name": "Convert Product Price",
+      "summary": "Frontend converts the product price to the user's preferred currency.",
+      "tags": ["currency", "conversion"],
+      "complexity": "simple",
+      "filePath": "src/frontend/handlers.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:view-product-details:fetch-recommendations",
+      "type": "step",
+      "name": "Fetch Recommendations",
+      "summary": "Frontend calls RecommendationService.ListRecommendations to get suggested products, then resolves each to full product details.",
+      "tags": ["recommendations", "grpc"],
+      "complexity": "moderate",
+      "filePath": "src/frontend/rpc.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:view-product-details:fetch-ads",
+      "type": "step",
+      "name": "Fetch Product Ads",
+      "summary": "Frontend calls AdService.GetAds with the product's category keys for contextual advertisements.",
+      "tags": ["ads", "grpc"],
+      "complexity": "simple",
+      "filePath": "src/frontend/rpc.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:view-product-details:render-page",
+      "type": "step",
+      "name": "Render Product Detail Page",
+      "summary": "Frontend assembles product info, converted price, recommendations, and ads into the product detail template.",
+      "tags": ["rendering", "template"],
+      "complexity": "simple",
+      "filePath": "src/frontend/handlers.go",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:manage-cart:validate-input",
+      "type": "step",
+      "name": "Validate Add-to-Cart Input",
+      "summary": "Frontend validates the product ID and quantity (1-10 range) from the add-to-cart form submission.",
+      "tags": ["validation", "input"],
+      "complexity": "simple",
+      "filePath": "src/frontend/validator/validator.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:manage-cart:add-item",
+      "type": "step",
+      "name": "Add Item to Cart",
+      "summary": "Frontend calls CartService.AddItem with the user's session ID, product ID, and quantity.",
+      "tags": ["cart", "grpc"],
+      "complexity": "simple",
+      "filePath": "src/frontend/rpc.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:manage-cart:retrieve-cart",
+      "type": "step",
+      "name": "Retrieve Cart Contents",
+      "summary": "Frontend calls CartService.GetCart to load all items in the user's cart with their quantities.",
+      "tags": ["cart", "grpc"],
+      "complexity": "simple",
+      "filePath": "src/frontend/rpc.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:manage-cart:resolve-product-details",
+      "type": "step",
+      "name": "Resolve Product Details for Cart Items",
+      "summary": "Frontend calls ProductCatalogService.GetProduct for each cart item to get names, descriptions, and prices.",
+      "tags": ["catalog", "grpc"],
+      "complexity": "moderate",
+      "filePath": "src/frontend/handlers.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:manage-cart:convert-cart-prices",
+      "type": "step",
+      "name": "Convert Cart Prices",
+      "summary": "Frontend converts each cart item's price and the total to the user's preferred currency.",
+      "tags": ["currency", "conversion"],
+      "complexity": "simple",
+      "filePath": "src/frontend/handlers.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:manage-cart:get-shipping-estimate",
+      "type": "step",
+      "name": "Get Shipping Estimate",
+      "summary": "Frontend calls ShippingService.GetQuote to display the estimated shipping cost in the cart view.",
+      "tags": ["shipping", "grpc"],
+      "complexity": "simple",
+      "filePath": "src/frontend/rpc.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:manage-cart:render-cart",
+      "type": "step",
+      "name": "Render Cart View",
+      "summary": "Frontend renders the cart page with item details, converted prices, shipping estimate, and order total.",
+      "tags": ["rendering", "template"],
+      "complexity": "simple",
+      "filePath": "src/frontend/handlers.go",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:checkout-purchase:validate-checkout-input",
+      "type": "step",
+      "name": "Validate Checkout Input",
+      "summary": "Frontend validates email, shipping address, and credit card fields from the checkout form.",
+      "tags": ["validation", "input"],
+      "complexity": "simple",
+      "filePath": "src/frontend/validator/validator.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:checkout-purchase:retrieve-cart-items",
+      "type": "step",
+      "name": "Retrieve Cart Items",
+      "summary": "Checkout service calls CartService.GetCart to get all items in the user's cart.",
+      "tags": ["cart", "grpc"],
+      "complexity": "simple",
+      "filePath": "src/checkoutservice/main.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:checkout-purchase:lookup-product-prices",
+      "type": "step",
+      "name": "Look Up Product Prices",
+      "summary": "Checkout service calls ProductCatalogService.GetProduct for each cart item to get current prices.",
+      "tags": ["catalog", "grpc"],
+      "complexity": "moderate",
+      "filePath": "src/checkoutservice/main.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:checkout-purchase:get-shipping-quote",
+      "type": "step",
+      "name": "Get Shipping Quote",
+      "summary": "Checkout service calls ShippingService.GetQuote to calculate the shipping cost for the order.",
+      "tags": ["shipping", "grpc"],
+      "complexity": "simple",
+      "filePath": "src/checkoutservice/main.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:checkout-purchase:convert-currency",
+      "type": "step",
+      "name": "Convert to User Currency",
+      "summary": "Checkout service calls CurrencyService.Convert to convert all amounts to the user's preferred currency.",
+      "tags": ["currency", "conversion", "grpc"],
+      "complexity": "simple",
+      "filePath": "src/checkoutservice/main.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:checkout-purchase:charge-payment",
+      "type": "step",
+      "name": "Charge Credit Card",
+      "summary": "Checkout service calls PaymentService.Charge with the total amount and credit card details.",
+      "tags": ["payment", "grpc"],
+      "complexity": "moderate",
+      "filePath": "src/checkoutservice/main.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:checkout-purchase:ship-order",
+      "type": "step",
+      "name": "Ship Order",
+      "summary": "Checkout service calls ShippingService.ShipOrder to get a tracking ID for the order.",
+      "tags": ["shipping", "grpc"],
+      "complexity": "simple",
+      "filePath": "src/checkoutservice/main.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:checkout-purchase:empty-cart",
+      "type": "step",
+      "name": "Empty Cart After Purchase",
+      "summary": "Checkout service calls CartService.EmptyCart to clear the user's cart after successful payment.",
+      "tags": ["cart", "grpc"],
+      "complexity": "simple",
+      "filePath": "src/checkoutservice/main.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:checkout-purchase:send-confirmation",
+      "type": "step",
+      "name": "Send Order Confirmation",
+      "summary": "Checkout service calls EmailService.SendOrderConfirmation with the order details and customer email.",
+      "tags": ["email", "notification", "grpc"],
+      "complexity": "simple",
+      "filePath": "src/checkoutservice/main.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:checkout-purchase:render-confirmation",
+      "type": "step",
+      "name": "Render Order Confirmation Page",
+      "summary": "Frontend renders the order confirmation page with order ID, tracking ID, and order summary.",
+      "tags": ["rendering", "template"],
+      "complexity": "simple",
+      "filePath": "src/frontend/handlers.go",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:set-currency:select-currency",
+      "type": "step",
+      "name": "Select Currency",
+      "summary": "User selects a currency from the dropdown populated by GetSupportedCurrencies.",
+      "tags": ["currency", "input"],
+      "complexity": "simple",
+      "filePath": "src/frontend/handlers.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:set-currency:store-preference",
+      "type": "step",
+      "name": "Store Currency Cookie",
+      "summary": "Frontend sets a cookie with the selected currency code and redirects back to the referring page.",
+      "tags": ["currency", "cookie", "preference"],
+      "complexity": "simple",
+      "filePath": "src/frontend/handlers.go",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:get-recommendations:fetch-catalog",
+      "type": "step",
+      "name": "Fetch Full Product Catalog",
+      "summary": "Recommendation service calls ProductCatalogService.ListProducts to get all available products.",
+      "tags": ["catalog", "grpc"],
+      "complexity": "simple",
+      "filePath": "src/recommendationservice/recommendation_server.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:get-recommendations:filter-viewed",
+      "type": "step",
+      "name": "Filter Already-Viewed Products",
+      "summary": "Recommendation service removes products the user has already viewed from the candidate set.",
+      "tags": ["filtering", "personalization"],
+      "complexity": "simple",
+      "filePath": "src/recommendationservice/recommendation_server.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:get-recommendations:sample-results",
+      "type": "step",
+      "name": "Sample Random Recommendations",
+      "summary": "Recommendation service randomly selects up to 5 products from the filtered set as recommendations.",
+      "tags": ["randomization", "selection"],
+      "complexity": "simple",
+      "filePath": "src/recommendationservice/recommendation_server.py",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:serve-ads:lookup-by-category",
+      "type": "step",
+      "name": "Look Up Ads by Category",
+      "summary": "Ad service searches its in-memory map for ads matching the provided context category keys.",
+      "tags": ["ads", "lookup"],
+      "complexity": "simple",
+      "filePath": "src/adservice/src/main/java/hipstershop/AdService.java",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:serve-ads:fallback-random",
+      "type": "step",
+      "name": "Fallback to Random Ads",
+      "summary": "If no category match is found, the ad service returns randomly selected ads from the full pool.",
+      "tags": ["ads", "fallback", "random"],
+      "complexity": "simple",
+      "filePath": "src/adservice/src/main/java/hipstershop/AdService.java",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:convert-currency:normalize-to-eur",
+      "type": "step",
+      "name": "Normalize to EUR",
+      "summary": "Currency service converts the source amount to EUR using the source currency's exchange rate.",
+      "tags": ["currency", "normalization"],
+      "complexity": "simple",
+      "filePath": "src/currencyservice/server.js",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:convert-currency:convert-to-target",
+      "type": "step",
+      "name": "Convert EUR to Target Currency",
+      "summary": "Currency service applies the target currency's exchange rate to the EUR-normalized amount.",
+      "tags": ["currency", "conversion"],
+      "complexity": "simple",
+      "filePath": "src/currencyservice/server.js",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:send-order-confirmation:render-template",
+      "type": "step",
+      "name": "Render Email Template",
+      "summary": "Email service renders the order confirmation HTML using Jinja2 templates with order details.",
+      "tags": ["email", "template", "jinja2"],
+      "complexity": "simple",
+      "filePath": "src/emailservice/email_server.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:send-order-confirmation:send-email",
+      "type": "step",
+      "name": "Send or Log Confirmation",
+      "summary": "Email service sends the rendered email via cloud mail client (production) or logs it (development).",
+      "tags": ["email", "send", "logging"],
+      "complexity": "simple",
+      "filePath": "src/emailservice/email_server.py",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:ai-shopping-assistant:analyze-room-image",
+      "type": "step",
+      "name": "Analyze Room Image with Gemini",
+      "summary": "Shopping assistant sends the user's room image to the Gemini vision model for interior design analysis.",
+      "tags": ["ai", "gemini", "vision", "image-analysis"],
+      "complexity": "complex",
+      "filePath": "src/shoppingassistantservice/shoppingassistantservice.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:ai-shopping-assistant:vector-search",
+      "type": "step",
+      "name": "Search Product Embeddings",
+      "summary": "Shopping assistant performs vector similarity search against product embeddings stored in AlloyDB.",
+      "tags": ["vector-search", "embeddings", "alloydb"],
+      "complexity": "complex",
+      "filePath": "src/shoppingassistantservice/shoppingassistantservice.py",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:ai-shopping-assistant:generate-response",
+      "type": "step",
+      "name": "Generate Recommendation Response",
+      "summary": "Shopping assistant uses Gemini to generate a natural language response with product recommendations based on the analysis and search results.",
+      "tags": ["ai", "gemini", "response-generation"],
+      "complexity": "moderate",
+      "filePath": "src/shoppingassistantservice/shoppingassistantservice.py",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:calculate-shipping:count-items",
+      "type": "step",
+      "name": "Count Total Items",
+      "summary": "Shipping service counts the total number of items in the shipping request.",
+      "tags": ["shipping", "calculation"],
+      "complexity": "simple",
+      "filePath": "src/shippingservice/main.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:calculate-shipping:calculate-quote",
+      "type": "step",
+      "name": "Calculate Flat-Rate Quote",
+      "summary": "Shipping service returns $8.99 for non-empty orders or $0 for empty orders via CreateQuoteFromCount.",
+      "tags": ["shipping", "pricing"],
+      "complexity": "simple",
+      "filePath": "src/shippingservice/quote.go",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:calculate-shipping:generate-tracking-id",
+      "type": "step",
+      "name": "Generate Tracking ID",
+      "summary": "Shipping service generates a tracking ID from address data and random components for shipped orders.",
+      "tags": ["shipping", "tracking"],
+      "complexity": "simple",
+      "filePath": "src/shippingservice/tracker.go",
+      "lineRange": [0, 0]
+    },
+
+    {
+      "id": "step:process-payment:validate-card",
+      "type": "step",
+      "name": "Validate Credit Card",
+      "summary": "Payment service validates the card number format (VISA/MasterCard) and checks the expiration date.",
+      "tags": ["payment", "validation"],
+      "complexity": "simple",
+      "filePath": "src/paymentservice/charge.js",
+      "lineRange": [0, 0]
+    },
+    {
+      "id": "step:process-payment:generate-transaction-id",
+      "type": "step",
+      "name": "Generate Transaction ID",
+      "summary": "Payment service generates a UUID transaction ID representing the successful simulated charge.",
+      "tags": ["payment", "transaction"],
+      "complexity": "simple",
+      "filePath": "src/paymentservice/charge.js",
+      "lineRange": [0, 0]
+    }
+  ],
+  "edges": [
+    { "source": "domain:product-catalog", "target": "flow:browse-products", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+    { "source": "domain:product-catalog", "target": "flow:view-product-details", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+    { "source": "domain:shopping-cart", "target": "flow:manage-cart", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+    { "source": "domain:checkout-and-ordering", "target": "flow:checkout-purchase", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+    { "source": "domain:payment-processing", "target": "flow:process-payment", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+    { "source": "domain:shipping", "target": "flow:calculate-shipping", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+    { "source": "domain:currency-conversion", "target": "flow:convert-currency", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+    { "source": "domain:currency-conversion", "target": "flow:set-currency", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+    { "source": "domain:email-notifications", "target": "flow:send-order-confirmation", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+    { "source": "domain:recommendations", "target": "flow:get-recommendations", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+    { "source": "domain:advertising", "target": "flow:serve-ads", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+    { "source": "domain:shopping-assistant", "target": "flow:ai-shopping-assistant", "type": "contains_flow", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:browse-products", "target": "step:browse-products:fetch-products", "type": "flow_step", "direction": "forward", "weight": 0.2 },
+    { "source": "flow:browse-products", "target": "step:browse-products:fetch-currencies", "type": "flow_step", "direction": "forward", "weight": 0.3 },
+    { "source": "flow:browse-products", "target": "step:browse-products:convert-prices", "type": "flow_step", "direction": "forward", "weight": 0.5 },
+    { "source": "flow:browse-products", "target": "step:browse-products:fetch-cart-size", "type": "flow_step", "direction": "forward", "weight": 0.7 },
+    { "source": "flow:browse-products", "target": "step:browse-products:fetch-ads", "type": "flow_step", "direction": "forward", "weight": 0.8 },
+    { "source": "flow:browse-products", "target": "step:browse-products:render-home", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:view-product-details", "target": "step:view-product-details:fetch-product", "type": "flow_step", "direction": "forward", "weight": 0.2 },
+    { "source": "flow:view-product-details", "target": "step:view-product-details:convert-price", "type": "flow_step", "direction": "forward", "weight": 0.4 },
+    { "source": "flow:view-product-details", "target": "step:view-product-details:fetch-recommendations", "type": "flow_step", "direction": "forward", "weight": 0.6 },
+    { "source": "flow:view-product-details", "target": "step:view-product-details:fetch-ads", "type": "flow_step", "direction": "forward", "weight": 0.8 },
+    { "source": "flow:view-product-details", "target": "step:view-product-details:render-page", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:manage-cart", "target": "step:manage-cart:validate-input", "type": "flow_step", "direction": "forward", "weight": 0.1 },
+    { "source": "flow:manage-cart", "target": "step:manage-cart:add-item", "type": "flow_step", "direction": "forward", "weight": 0.2 },
+    { "source": "flow:manage-cart", "target": "step:manage-cart:retrieve-cart", "type": "flow_step", "direction": "forward", "weight": 0.3 },
+    { "source": "flow:manage-cart", "target": "step:manage-cart:resolve-product-details", "type": "flow_step", "direction": "forward", "weight": 0.4 },
+    { "source": "flow:manage-cart", "target": "step:manage-cart:convert-cart-prices", "type": "flow_step", "direction": "forward", "weight": 0.6 },
+    { "source": "flow:manage-cart", "target": "step:manage-cart:get-shipping-estimate", "type": "flow_step", "direction": "forward", "weight": 0.7 },
+    { "source": "flow:manage-cart", "target": "step:manage-cart:render-cart", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:checkout-purchase", "target": "step:checkout-purchase:validate-checkout-input", "type": "flow_step", "direction": "forward", "weight": 0.1 },
+    { "source": "flow:checkout-purchase", "target": "step:checkout-purchase:retrieve-cart-items", "type": "flow_step", "direction": "forward", "weight": 0.2 },
+    { "source": "flow:checkout-purchase", "target": "step:checkout-purchase:lookup-product-prices", "type": "flow_step", "direction": "forward", "weight": 0.3 },
+    { "source": "flow:checkout-purchase", "target": "step:checkout-purchase:get-shipping-quote", "type": "flow_step", "direction": "forward", "weight": 0.4 },
+    { "source": "flow:checkout-purchase", "target": "step:checkout-purchase:convert-currency", "type": "flow_step", "direction": "forward", "weight": 0.5 },
+    { "source": "flow:checkout-purchase", "target": "step:checkout-purchase:charge-payment", "type": "flow_step", "direction": "forward", "weight": 0.6 },
+    { "source": "flow:checkout-purchase", "target": "step:checkout-purchase:ship-order", "type": "flow_step", "direction": "forward", "weight": 0.7 },
+    { "source": "flow:checkout-purchase", "target": "step:checkout-purchase:empty-cart", "type": "flow_step", "direction": "forward", "weight": 0.8 },
+    { "source": "flow:checkout-purchase", "target": "step:checkout-purchase:send-confirmation", "type": "flow_step", "direction": "forward", "weight": 0.9 },
+    { "source": "flow:checkout-purchase", "target": "step:checkout-purchase:render-confirmation", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:set-currency", "target": "step:set-currency:select-currency", "type": "flow_step", "direction": "forward", "weight": 0.5 },
+    { "source": "flow:set-currency", "target": "step:set-currency:store-preference", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:get-recommendations", "target": "step:get-recommendations:fetch-catalog", "type": "flow_step", "direction": "forward", "weight": 0.3 },
+    { "source": "flow:get-recommendations", "target": "step:get-recommendations:filter-viewed", "type": "flow_step", "direction": "forward", "weight": 0.7 },
+    { "source": "flow:get-recommendations", "target": "step:get-recommendations:sample-results", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:serve-ads", "target": "step:serve-ads:lookup-by-category", "type": "flow_step", "direction": "forward", "weight": 0.5 },
+    { "source": "flow:serve-ads", "target": "step:serve-ads:fallback-random", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:convert-currency", "target": "step:convert-currency:normalize-to-eur", "type": "flow_step", "direction": "forward", "weight": 0.5 },
+    { "source": "flow:convert-currency", "target": "step:convert-currency:convert-to-target", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:send-order-confirmation", "target": "step:send-order-confirmation:render-template", "type": "flow_step", "direction": "forward", "weight": 0.5 },
+    { "source": "flow:send-order-confirmation", "target": "step:send-order-confirmation:send-email", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:ai-shopping-assistant", "target": "step:ai-shopping-assistant:analyze-room-image", "type": "flow_step", "direction": "forward", "weight": 0.3 },
+    { "source": "flow:ai-shopping-assistant", "target": "step:ai-shopping-assistant:vector-search", "type": "flow_step", "direction": "forward", "weight": 0.7 },
+    { "source": "flow:ai-shopping-assistant", "target": "step:ai-shopping-assistant:generate-response", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:calculate-shipping", "target": "step:calculate-shipping:count-items", "type": "flow_step", "direction": "forward", "weight": 0.3 },
+    { "source": "flow:calculate-shipping", "target": "step:calculate-shipping:calculate-quote", "type": "flow_step", "direction": "forward", "weight": 0.7 },
+    { "source": "flow:calculate-shipping", "target": "step:calculate-shipping:generate-tracking-id", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "flow:process-payment", "target": "step:process-payment:validate-card", "type": "flow_step", "direction": "forward", "weight": 0.5 },
+    { "source": "flow:process-payment", "target": "step:process-payment:generate-transaction-id", "type": "flow_step", "direction": "forward", "weight": 1.0 },
+
+    { "source": "domain:checkout-and-ordering", "target": "domain:shopping-cart", "type": "cross_domain", "direction": "forward", "description": "Checkout retrieves cart items and empties cart after purchase", "weight": 0.9 },
+    { "source": "domain:checkout-and-ordering", "target": "domain:product-catalog", "type": "cross_domain", "direction": "forward", "description": "Checkout looks up product prices for each cart item", "weight": 0.9 },
+    { "source": "domain:checkout-and-ordering", "target": "domain:currency-conversion", "type": "cross_domain", "direction": "forward", "description": "Checkout converts order amounts to user's preferred currency", "weight": 0.7 },
+    { "source": "domain:checkout-and-ordering", "target": "domain:shipping", "type": "cross_domain", "direction": "forward", "description": "Checkout requests shipping quote and initiates shipment", "weight": 0.8 },
+    { "source": "domain:checkout-and-ordering", "target": "domain:payment-processing", "type": "cross_domain", "direction": "forward", "description": "Checkout charges the customer's credit card via payment service", "weight": 0.9 },
+    { "source": "domain:checkout-and-ordering", "target": "domain:email-notifications", "type": "cross_domain", "direction": "forward", "description": "Checkout sends order confirmation email after successful payment", "weight": 0.7 },
+    { "source": "domain:recommendations", "target": "domain:product-catalog", "type": "cross_domain", "direction": "forward", "description": "Recommendation service queries full product catalog to generate suggestions", "weight": 0.8 },
+    { "source": "domain:product-catalog", "target": "domain:currency-conversion", "type": "cross_domain", "direction": "forward", "description": "Frontend converts product prices to user's preferred currency when displaying catalog", "weight": 0.6 },
+    { "source": "domain:shopping-cart", "target": "domain:product-catalog", "type": "cross_domain", "direction": "forward", "description": "Cart view resolves product details for each cart item", "weight": 0.6 },
+    { "source": "domain:shopping-cart", "target": "domain:shipping", "type": "cross_domain", "direction": "forward", "description": "Cart view displays shipping cost estimate", "weight": 0.5 }
+  ],
+  "layers": [],
+  "tour": []
+}
