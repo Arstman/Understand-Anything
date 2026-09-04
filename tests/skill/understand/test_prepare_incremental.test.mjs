@@ -183,7 +183,7 @@ function prepare(root, baseCommit, extraArgs = []) {
     result,
     plan: JSON.parse(readFileSync(join(intermediate, 'incremental-plan.json'), 'utf-8')),
     scan: JSON.parse(readFileSync(join(intermediate, 'scan-result.json'), 'utf-8')),
-    changedFiles: readFileSync(join(intermediate, 'changed-files.txt'), 'utf-8'),
+    changedFiles: JSON.parse(readFileSync(join(intermediate, 'changed-files.json'), 'utf-8')),
   };
 }
 
@@ -209,7 +209,7 @@ describe('prepare-incremental.mjs', { timeout: 30_000 }, () => {
     const { plan, scan, changedFiles } = prepare(root, baseCommit);
     expect(plan.action).toBe('PARTIAL_UPDATE');
     expect(plan.filesToReanalyze).toEqual(['src/a.ts']);
-    expect(changedFiles).toBe('src/a.ts\n');
+    expect(changedFiles).toEqual(['src/a.ts']);
     expect(scan.importMap['src/a.ts']).toEqual(['src/b.ts']);
     expect(scan.importMap['src/c.ts']).toEqual([]);
   });
@@ -236,7 +236,7 @@ describe('prepare-incremental.mjs', { timeout: 30_000 }, () => {
     expect(plan.action).toBe('PARTIAL_UPDATE');
     expect(plan.filesToReanalyze).toEqual([]);
     expect(plan.deletedFiles).toEqual(['src/b.ts']);
-    expect(changedFiles).toBe('');
+    expect(changedFiles).toEqual([]);
     expect(scan.files.map(file => file.path)).not.toContain('src/b.ts');
     expect(scan.importMap).not.toHaveProperty('src/b.ts');
     expect(() => readFileSync(join(root, '.ua', 'intermediate', 'batch-99.json'))).toThrow();
@@ -464,7 +464,7 @@ describe('prepare-incremental.mjs', { timeout: 30_000 }, () => {
     expect(plan.action).toBe('SKIP');
     expect(plan.cosmeticFiles).toEqual(['src/a.ts']);
     expect(plan.filesToReanalyze).toEqual([]);
-    expect(changedFiles).toBe('');
+    expect(changedFiles).toEqual([]);
   });
 
   it('applies a new explicit exclude against the current inventory at the same commit', () => {
@@ -596,6 +596,29 @@ describe('prepare-incremental.mjs', { timeout: 30_000 }, () => {
       const { plan, scan } = prepare(root, baseCommit);
       expect(plan.filesToReanalyze).toEqual([literalPath]);
       expect(scan.files.map(file => file.path)).toContain(literalPath);
+    },
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'preserves newline-containing paths in the JSON analyzer handoff',
+    () => {
+      const newlinePath = 'src/line\nbreak.js';
+      const { root, baseCommit } = setupRepository({
+        [newlinePath]: 'function before() { return 1; }\nmodule.exports = before;\n',
+        'src/a.js': 'module.exports = 1;\n',
+        'src/b.js': 'module.exports = 2;\n',
+        'src/c.js': 'module.exports = 3;\n',
+      });
+      writeProjectFile(
+        root,
+        newlinePath,
+        'function after() { return 1; }\nmodule.exports = after;\n',
+      );
+      commit(root, 'change newline path');
+
+      const { plan, changedFiles } = prepare(root, baseCommit);
+      expect(plan.filesToReanalyze).toEqual([newlinePath]);
+      expect(changedFiles).toEqual([newlinePath]);
     },
   );
 

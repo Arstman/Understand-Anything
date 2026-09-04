@@ -48,7 +48,7 @@ Read `filesToReanalyze` from the plan. It never contains deleted, ignored, cosme
 
   ```bash
   node "$PLUGIN_ROOT/skills/understand/compute-batches.mjs" "$PROJECT_ROOT" \
-    --changed-files="$UA_DIR/intermediate/changed-files.txt"
+    --changed-files="$UA_DIR/intermediate/changed-files.json"
   ```
 
   Dispatch file-analyzer for those batches only, using `agents/file-analyzer.md` and the batch prompt contract from the `/understand` skill. Preserve each original batch index in its output filename. Retry a failed dispatch once; if it still fails, **STOP** without running the finalizer or advancing the baseline.

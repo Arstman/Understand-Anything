@@ -210,7 +210,7 @@ Determine whether to run a full analysis or incremental update.
    The helper uses parameterized `git diff --name-status -z`, performs a fresh deterministic scan with the current `.understandignore` / `--exclude` rules, compares structural fingerprints, selectively refreshes imports, and atomically writes:
    - `$UA_DIR/intermediate/incremental-plan.json`
    - `$UA_DIR/intermediate/scan-result.json`
-   - `$UA_DIR/intermediate/changed-files.txt`
+   - `$UA_DIR/intermediate/changed-files.json`
    - `$UA_DIR/intermediate/batch-existing.json` for partial/architecture updates
 
    Read `incremental-plan.json` and store its `action`, `filesToReanalyze`, `deletedFiles`, `rerunArchitecture`, and `rerunTour` values. Follow this gate:
@@ -318,7 +318,7 @@ For `PARTIAL_UPDATE` or `ARCHITECTURE_UPDATE`, inspect `filesToReanalyze` from t
 
   ```bash
   node "<SKILL_DIR>/compute-batches.mjs" "$PROJECT_ROOT" \
-    --changed-files="$UA_DIR/intermediate/changed-files.txt"
+    --changed-files="$UA_DIR/intermediate/changed-files.json"
   ```
 
 Both forms read the freshly reconciled `$UA_DIR/intermediate/scan-result.json` and write `$UA_DIR/intermediate/batches.json`.

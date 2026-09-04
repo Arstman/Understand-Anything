@@ -8,7 +8,7 @@
  *
  * Writes under <UA_DIR>/intermediate:
  *   - incremental-plan.json
- *   - changed-files.txt
+ *   - changed-files.json
  *   - fingerprint-patch.json
  *   - incremental-baseline.json (retry-safe copy of the pre-update scan)
  *   - batch-existing.json (PARTIAL/ARCHITECTURE only)
@@ -673,11 +673,7 @@ async function main() {
     files: currentFingerprints.files,
     deletedFiles,
   });
-  writeFileSync(
-    join(intermediateDir, 'changed-files.txt'),
-    filesToReanalyze.length > 0 ? `${filesToReanalyze.join('\n')}\n` : '',
-    'utf-8',
-  );
+  atomicWriteJson(join(intermediateDir, 'changed-files.json'), filesToReanalyze);
 
   if (decision.action === 'PARTIAL_UPDATE' || decision.action === 'ARCHITECTURE_UPDATE') {
     const pathsToReplace = new Set([...filesToReanalyze, ...deletedFiles]);
