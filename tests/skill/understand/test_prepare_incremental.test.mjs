@@ -187,8 +187,12 @@ function prepare(root, baseCommit, extraArgs = []) {
   };
 }
 
-afterEach(() => {
+afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  // These integration tests intentionally use synchronous child processes.
+  // Yield between cases so Vitest workers can service task-update RPC replies,
+  // especially on slower Windows runners where the full file exceeds 60s.
+  await new Promise(resolve => setImmediate(resolve));
 });
 
 describe('prepare-incremental.mjs', { timeout: 30_000 }, () => {
