@@ -382,7 +382,7 @@ function runScan(projectRoot, outputPath, excludePatterns) {
   return readJson(outputPath);
 }
 
-function refreshImportMap({ projectRoot, intermediateDir, oldScan, currentScan, analysisPaths }) {
+function refreshImportMap({ projectRoot, intermediateDir, previousScan, currentScan, analysisPaths }) {
   const inputPath = join(intermediateDir, 'incremental-import-input.json');
   const outputPath = join(intermediateDir, 'incremental-import-output.json');
   atomicWriteJson(inputPath, {
@@ -408,7 +408,7 @@ function refreshImportMap({ projectRoot, intermediateDir, oldScan, currentScan, 
     const path = file.path;
     const candidate = Object.hasOwn(selective, path)
       ? selective[path]
-      : oldScan?.importMap?.[path];
+      : previousScan?.importMap?.[path];
     importMap[path] = Array.isArray(candidate)
       ? sorted(candidate.filter(target => typeof target === 'string' && currentPaths.has(target)))
       : [];
@@ -608,7 +608,7 @@ async function main() {
     decision.filesToReanalyze.filter(path => currentInventorySet.has(path)),
   );
   const missingImportEntries = currentInventory.filter(
-    path => !Object.hasOwn(oldScan?.importMap ?? {}, path),
+    path => !Object.hasOwn(baselineScan?.importMap ?? {}, path),
   );
   // Adding/removing a resolution candidate can change an unchanged importer's
   // winner (foo.ts vs foo.js vs foo/index.ts). Resolver configuration edits
@@ -624,7 +624,7 @@ async function main() {
   const importMap = refreshImportMap({
     projectRoot,
     intermediateDir,
-    oldScan,
+    previousScan: baselineScan,
     currentScan,
     analysisPaths: importAnalysisPaths,
   });

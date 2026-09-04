@@ -616,6 +616,35 @@ describe('prepare-incremental.mjs', { timeout: 30_000 }, () => {
     expect(second.filesToReanalyze).toEqual(['new-package/index.ts']);
   });
 
+  it('reuses the preserved import map when retrying a different head', () => {
+    const { root, baseCommit } = setupRepository({
+      'src/index.js': "const value = require('./a');\nmodule.exports = value;\n",
+      'src/a.js': 'module.exports = 1;\n',
+      'src/b.js': 'module.exports = 2;\n',
+      'src/c.js': 'function c() { return 3; }\nmodule.exports = c;\n',
+    });
+    writeProjectFile(
+      root,
+      'src/index.js',
+      "const value = require('./b');\nmodule.exports = value;\n",
+    );
+    commit(root, 'abandoned head changes import');
+    const abandoned = prepare(root, baseCommit);
+    expect(abandoned.scan.importMap['src/index.js']).toEqual(['src/b.js']);
+
+    git(root, ['reset', '--hard', baseCommit]);
+    writeProjectFile(
+      root,
+      'src/c.js',
+      'function changedC() { return 3; }\nmodule.exports = changedC;\n',
+    );
+    commit(root, 'replacement head changes another file');
+    const replacement = prepare(root, baseCommit);
+
+    expect(replacement.scan.importMap['src/index.js']).toEqual(['src/a.js']);
+    expect(replacement.plan.filesToReanalyze).toEqual(['src/c.js']);
+  });
+
   it('does not advance the baseline for generated-artifact-only commits', () => {
     const { root, baseCommit } = setupRepository({
       'src/a.ts': 'export const a = 1;\n',
