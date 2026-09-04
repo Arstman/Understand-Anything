@@ -267,6 +267,39 @@ function normalizeAssembled(assembled) {
   return { nodes, edges };
 }
 
+function refreshGraphImports(graph, importMap, refreshPaths) {
+  const pathIndex = buildPathIndex(graph.nodes);
+  const refreshedSourceIds = new Set(
+    refreshPaths.map(path => pathIndex.get(path)).filter(Boolean),
+  );
+  const edges = graph.edges.filter(
+    edge => !(edge.type === 'imports' && refreshedSourceIds.has(edge.source)),
+  );
+  const seen = new Set(edges.map(edge => `${edge.source}\0${edge.target}\0${edge.type}`));
+
+  for (const sourcePath of refreshPaths) {
+    const source = pathIndex.get(sourcePath);
+    if (!source) continue;
+    const targets = Array.isArray(importMap?.[sourcePath]) ? importMap[sourcePath] : [];
+    for (const targetPath of targets) {
+      const target = pathIndex.get(targetPath);
+      if (!target || source === target) continue;
+      const key = `${source}\0${target}\0imports`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      edges.push({
+        source,
+        target,
+        type: 'imports',
+        direction: 'forward',
+        weight: 0.7,
+        recoveredFromImportMap: true,
+      });
+    }
+  }
+  return { ...graph, edges };
+}
+
 function normalizeFingerprintStore(raw, baseCommit) {
   if (raw && raw.files && typeof raw.files === 'object' && !Array.isArray(raw.files)) {
     return raw;
@@ -354,14 +387,22 @@ function main() {
   }
 
   const graphPath = join(uaDir, 'knowledge-graph.json');
+  const importMapRefreshPaths = Array.isArray(plan.importMapRefreshPaths)
+    ? plan.importMapRefreshPaths
+    : [];
 
   if (plan.action === 'SKIP') {
     const previousGraph = readJson(graphPath);
     if (!previousGraph || !Array.isArray(previousGraph.nodes) || !Array.isArray(previousGraph.edges)) {
       throw new Error('knowledge-graph.json is missing or invalid; baseline not advanced');
     }
+    const refreshedGraph = refreshGraphImports(
+      previousGraph,
+      scan.importMap ?? {},
+      importMapRefreshPaths,
+    );
     atomicWriteJson(graphPath, {
-      ...previousGraph,
+      ...refreshedGraph,
       project: projectMetadata(previousGraph.project, plan, scan),
     });
   }
@@ -372,7 +413,11 @@ function main() {
     if (!assembledRaw || !Array.isArray(assembledRaw.nodes) || !Array.isArray(assembledRaw.edges)) {
       throw new Error('assembled-graph.json is missing or invalid; baseline not advanced');
     }
-    const assembled = normalizeAssembled(assembledRaw);
+    const assembled = refreshGraphImports(
+      normalizeAssembled(assembledRaw),
+      scan.importMap ?? {},
+      importMapRefreshPaths,
+    );
     const nodeIds = new Set(assembled.nodes.map(node => node.id));
     const pathIndex = buildPathIndex(assembled.nodes);
     const missingAnalyzedPaths = plan.filesToReanalyze.filter(path => !pathIndex.has(path));
@@ -438,4 +483,4 @@ if (isCliEntry()) {
   }
 }
 
-export { assignLayers, commonParentDepth, normalizeTour };
+export { assignLayers, commonParentDepth, normalizeTour, refreshGraphImports };

@@ -127,6 +127,18 @@ function buildBaseline(root, baseCommit) {
     tags: ['fixture'],
     complexity: 'simple',
   }));
+  const nodeIdByPath = new Map(nodes.map(node => [node.filePath, node.id]));
+  const edges = Object.entries(importMap).flatMap(([sourcePath, targets]) =>
+    targets
+      .filter(targetPath => nodeIdByPath.has(sourcePath) && nodeIdByPath.has(targetPath))
+      .map(targetPath => ({
+        source: nodeIdByPath.get(sourcePath),
+        target: nodeIdByPath.get(targetPath),
+        type: 'imports',
+        direction: 'forward',
+        weight: 0.7,
+      })),
+  );
   writeFileSync(
     join(root, '.ua', 'knowledge-graph.json'),
     JSON.stringify({
@@ -140,7 +152,7 @@ function buildBaseline(root, baseCommit) {
         gitCommitHash: baseCommit,
       },
       nodes,
-      edges: [],
+      edges,
       layers: [{
         id: 'layer:source',
         name: 'Source',
@@ -308,6 +320,34 @@ describe('prepare-incremental.mjs', { timeout: 30_000 }, () => {
     const { plan, scan } = prepare(root, baseCommit);
     expect(plan.filesToReanalyze).toEqual(['src/foo.ts']);
     expect(scan.importMap['src/index.ts']).toEqual(['src/foo.ts']);
+    const intermediate = join(root, '.ua', 'intermediate');
+    const retained = JSON.parse(readFileSync(join(intermediate, 'batch-existing.json'), 'utf-8'));
+    expect(retained.edges).not.toContainEqual(
+      expect.objectContaining({ source: 'file:src/index.ts', type: 'imports' }),
+    );
+    writeFileSync(
+      join(intermediate, 'batch-0.json'),
+      JSON.stringify({
+        nodes: [{
+          id: 'file:src/foo.ts',
+          type: 'file',
+          name: 'foo.ts',
+          filePath: 'src/foo.ts',
+          summary: 'Preferred TypeScript candidate',
+          tags: ['typescript'],
+          complexity: 'simple',
+        }],
+        edges: [],
+      }),
+      'utf-8',
+    );
+    run(python, [mergeScript, root], root);
+    const assembled = JSON.parse(
+      readFileSync(join(intermediate, 'assembled-graph.json'), 'utf-8'),
+    );
+    expect(assembled.edges.filter(edge => edge.source === 'file:src/index.ts')).toEqual([
+      expect.objectContaining({ target: 'file:src/foo.ts', type: 'imports' }),
+    ]);
   });
 
   it('re-resolves unchanged importers to a fallback when a preferred candidate is deleted', () => {
@@ -364,6 +404,11 @@ describe('prepare-incremental.mjs', { timeout: 30_000 }, () => {
     expect(plan.cosmeticFiles).toEqual(['src/index.js']);
     expect(plan.filesToReanalyze).toEqual([]);
     expect(scan.importMap['src/index.js']).toEqual(['src/b.js']);
+    run(process.execPath, [finalizeScript, root], root);
+    const graph = JSON.parse(readFileSync(join(root, '.ua', 'knowledge-graph.json'), 'utf-8'));
+    expect(graph.edges.filter(edge => edge.source === 'file:src/index.js')).toEqual([
+      expect.objectContaining({ target: 'file:src/b.js', type: 'imports' }),
+    ]);
   });
 
   it('treats LF-to-CRLF conversion as cosmetic and schedules no analyzer', () => {

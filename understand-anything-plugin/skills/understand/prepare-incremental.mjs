@@ -60,6 +60,15 @@ const {
 const SCAN_SCRIPT = join(__dirname, 'scan-project.mjs');
 const IMPORT_SCRIPT = join(__dirname, 'extract-import-map.mjs');
 const GENERATED_ROOTS = new Set(['.ua', '.understand-anything']);
+const WHOLE_FILE_TYPES = new Set([
+  'file',
+  'config',
+  'document',
+  'service',
+  'pipeline',
+  'schema',
+  'resource',
+]);
 
 function comparePaths(a, b) {
   if (a === b) return 0;
@@ -387,19 +396,31 @@ function refreshImportMap({ projectRoot, intermediateDir, oldScan, currentScan, 
   return importMap;
 }
 
-function pruneExistingGraph(graph, pathsToReplace) {
+function pruneExistingGraph(graph, pathsToReplace, importPathsToRefresh = new Set()) {
   const removedNodeIds = new Set();
+  const refreshedImportSourceIds = new Set();
   const nodes = [];
   for (const node of graph?.nodes ?? []) {
     const path = normalizeRelativePath(node?.filePath);
     if (path && pathsToReplace.has(path)) removedNodeIds.add(node.id);
-    else nodes.push(node);
+    else {
+      nodes.push(node);
+      if (
+        path
+        && importPathsToRefresh.has(path)
+        && WHOLE_FILE_TYPES.has(node.type)
+        && node.id === `${node.type}:${path}`
+      ) {
+        refreshedImportSourceIds.add(node.id);
+      }
+    }
   }
   const retainedIds = new Set(nodes.map(node => node.id));
   const edges = (graph?.edges ?? []).filter(
     edge =>
       !removedNodeIds.has(edge.source)
       && !removedNodeIds.has(edge.target)
+      && !(edge.type === 'imports' && refreshedImportSourceIds.has(edge.source))
       && retainedIds.has(edge.source)
       && retainedIds.has(edge.target),
   );
@@ -591,6 +612,7 @@ async function main() {
     cosmeticFiles: analysis.cosmeticOnlyFiles,
     ignoredFiles,
     generatedArtifactFiles,
+    importMapRefreshPaths: importAnalysisPaths,
     rerunArchitecture: decision.rerunArchitecture,
     rerunTour: decision.rerunTour,
     reason: decision.reason,
@@ -614,7 +636,7 @@ async function main() {
     const pathsToReplace = new Set([...filesToReanalyze, ...deletedFiles]);
     atomicWriteJson(
       join(intermediateDir, 'batch-existing.json'),
-      pruneExistingGraph(graph, pathsToReplace),
+      pruneExistingGraph(graph, pathsToReplace, new Set(importAnalysisPaths)),
     );
   }
   atomicWriteJson(join(intermediateDir, 'incremental-plan.json'), plan);
