@@ -729,6 +729,49 @@ describe('finalize-incremental.mjs', { timeout: 30_000 }, () => {
     expect(readFileSync(metaPath, 'utf-8')).toBe(metaBefore);
   });
 
+  it.each([
+    ['table', 'db/schema.sql', 'users'],
+    ['endpoint', 'api/openapi.yaml', 'GET-users'],
+  ])('accepts a valid %s node as analyzed-file coverage', (nodeType, changedPath, name) => {
+    const initialContent = nodeType === 'table'
+      ? 'CREATE TABLE users (id INT);\n'
+      : 'openapi: 3.0.0\npaths: {}\n';
+    const changedContent = nodeType === 'table'
+      ? 'CREATE TABLE users (id INT, name TEXT);\n'
+      : 'openapi: 3.0.0\npaths:\n  /users: {}\n';
+    const { root, baseCommit } = setupRepository({
+      'src/a.ts': 'export const a = 1;\n',
+      'src/b.ts': 'export const b = 2;\n',
+      'src/c.ts': 'export const c = 3;\n',
+      [changedPath]: initialContent,
+    });
+    writeProjectFile(root, changedPath, changedContent);
+    const headCommit = commit(root, `change ${nodeType} file`);
+    prepare(root, baseCommit);
+
+    const intermediate = join(root, '.ua', 'intermediate');
+    const retained = JSON.parse(readFileSync(join(intermediate, 'batch-existing.json'), 'utf-8'));
+    const analyzedNode = {
+      id: `${nodeType}:${changedPath}:${name}`,
+      type: nodeType,
+      name,
+      filePath: changedPath,
+      summary: `${nodeType} definition`,
+      tags: [nodeType],
+      complexity: 'simple',
+    };
+    writeFileSync(
+      join(intermediate, 'assembled-graph.json'),
+      JSON.stringify({ nodes: [...retained.nodes, analyzedNode], edges: retained.edges }),
+      'utf-8',
+    );
+    run(process.execPath, [finalizeScript, root], root);
+
+    const graph = JSON.parse(readFileSync(join(root, '.ua', 'knowledge-graph.json'), 'utf-8'));
+    expect(graph.project.gitCommitHash).toBe(headCommit);
+    expect(graph.nodes).toContainEqual(expect.objectContaining({ id: analyzedNode.id }));
+  });
+
   it('adds a newly introduced language to graph project metadata', () => {
     const { root, baseCommit } = setupRepository({
       'src/a.ts': 'export const a = 1;\n',

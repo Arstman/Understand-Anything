@@ -104,6 +104,18 @@ function buildPathIndex(nodes) {
   return index;
 }
 
+function hasAnalyzedFileCoverage(nodes, filePath) {
+  return nodes.some(node => {
+    const path = normalizeRelativePath(node.filePath);
+    if (path !== filePath || typeof node.id !== 'string') return false;
+    if (WHOLE_FILE_TYPES.has(node.type)) return node.id === `${node.type}:${filePath}`;
+    if (node.type === 'table' || node.type === 'endpoint') {
+      return node.id.startsWith(`${node.type}:${filePath}:`);
+    }
+    return false;
+  });
+}
+
 function resolveNodeRef(value, nodeIds, pathIndex) {
   if (typeof value === 'object' && value) value = value.id;
   if (typeof value !== 'string' || !value) return null;
@@ -420,7 +432,9 @@ function main() {
     );
     const nodeIds = new Set(assembled.nodes.map(node => node.id));
     const pathIndex = buildPathIndex(assembled.nodes);
-    const missingAnalyzedPaths = plan.filesToReanalyze.filter(path => !pathIndex.has(path));
+    const missingAnalyzedPaths = plan.filesToReanalyze.filter(
+      path => !hasAnalyzedFileCoverage(assembled.nodes, path),
+    );
     if (missingAnalyzedPaths.length > 0) {
       throw new Error(
         `Assembled graph is missing whole-file nodes for analyzed paths: ` +
@@ -483,4 +497,10 @@ if (isCliEntry()) {
   }
 }
 
-export { assignLayers, commonParentDepth, normalizeTour, refreshGraphImports };
+export {
+  assignLayers,
+  commonParentDepth,
+  hasAnalyzedFileCoverage,
+  normalizeTour,
+  refreshGraphImports,
+};
