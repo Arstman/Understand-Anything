@@ -160,8 +160,8 @@ function buildBaseline(root, baseCommit) {
   );
 }
 
-function prepare(root, baseCommit) {
-  const result = run(process.execPath, [prepareScript, root, baseCommit], root);
+function prepare(root, baseCommit, extraArgs = []) {
+  const result = run(process.execPath, [prepareScript, root, baseCommit, ...extraArgs], root);
   const intermediate = join(root, '.ua', 'intermediate');
   return {
     result,
@@ -274,6 +274,123 @@ describe('prepare-incremental.mjs', { timeout: 30_000 }, () => {
       readFileSync(join(intermediate, 'assembled-graph.json'), 'utf-8'),
     );
     expect(assembled.edges.filter(edge => edge.type === 'imports')).toHaveLength(0);
+  });
+
+  it('removes a deleted target from unchanged import-map sources', () => {
+    const { root, baseCommit } = setupRepository({
+      'src/a.ts': "import { b } from './b';\nexport const a = b;\n",
+      'src/b.ts': 'export const b = 2;\n',
+      'src/c.ts': 'export const c = 3;\n',
+      'src/d.ts': 'export const d = 4;\n',
+    });
+    unlinkSync(join(root, 'src/b.ts'));
+    commit(root, 'delete imported target');
+
+    const { plan, scan } = prepare(root, baseCommit);
+    expect(plan.filesToReanalyze).toEqual([]);
+    expect(plan.deletedFiles).toEqual(['src/b.ts']);
+    expect(scan.importMap['src/a.ts']).toEqual([]);
+  });
+
+  it('re-resolves unchanged importers when a preferred candidate is added', () => {
+    const { root, baseCommit } = setupRepository({
+      'src/index.ts': "import { value } from './foo';\nexport { value };\n",
+      'src/foo.js': 'export const value = 1;\n',
+      'src/a.ts': 'export const a = 1;\n',
+      'src/b.ts': 'export const b = 2;\n',
+    });
+    writeProjectFile(root, 'src/foo.ts', 'export const value = 2;\n');
+    commit(root, 'add preferred typescript candidate');
+
+    const { plan, scan } = prepare(root, baseCommit);
+    expect(plan.filesToReanalyze).toEqual(['src/foo.ts']);
+    expect(scan.importMap['src/index.ts']).toEqual(['src/foo.ts']);
+  });
+
+  it('re-resolves unchanged importers to a fallback when a preferred candidate is deleted', () => {
+    const { root, baseCommit } = setupRepository({
+      'src/index.ts': "import { value } from './foo';\nexport { value };\n",
+      'src/foo.ts': 'export const value = 2;\n',
+      'src/foo.js': 'export const value = 1;\n',
+      'src/a.ts': 'export const a = 1;\n',
+      'src/b.ts': 'export const b = 2;\n',
+    });
+    unlinkSync(join(root, 'src/foo.ts'));
+    commit(root, 'delete preferred typescript candidate');
+
+    const { plan, scan } = prepare(root, baseCommit);
+    expect(plan.filesToReanalyze).toEqual([]);
+    expect(scan.importMap['src/index.ts']).toEqual(['src/foo.js']);
+  });
+
+  it('re-resolves unchanged importers when resolver configuration changes', () => {
+    const { root, baseCommit } = setupRepository({
+      'tsconfig.json': JSON.stringify({
+        compilerOptions: { baseUrl: '.', paths: { '@/*': ['src/*'] } },
+      }),
+      'src/index.ts': "import { value } from '@/foo';\nexport { value };\n",
+      'src/foo.ts': 'export const value = 1;\n',
+      'alternate/foo.ts': 'export const value = 2;\n',
+      'src/a.ts': 'export const a = 1;\n',
+    });
+    writeProjectFile(root, 'tsconfig.json', JSON.stringify({
+      compilerOptions: { baseUrl: '.', paths: { '@/*': ['alternate/*'] } },
+    }));
+    commit(root, 'change alias target');
+
+    const { scan } = prepare(root, baseCommit);
+    expect(scan.importMap['src/index.ts']).toEqual(['alternate/foo.ts']);
+  });
+
+  it('treats LF-to-CRLF conversion as cosmetic and schedules no analyzer', () => {
+    const { root, baseCommit } = setupRepository({
+      'src/a.ts': 'export function value() {\n  return 1;\n}\n',
+      'src/b.ts': 'export const b = 2;\n',
+      'src/c.ts': 'export const c = 3;\n',
+      'src/d.ts': 'export const d = 4;\n',
+    });
+    writeProjectFile(root, 'src/a.ts', 'export function value() {\r\n  return 1;\r\n}\r\n');
+    commit(root, 'convert line endings');
+
+    const { plan, changedFiles } = prepare(root, baseCommit);
+    expect(plan.action).toBe('SKIP');
+    expect(plan.cosmeticFiles).toEqual(['src/a.ts']);
+    expect(plan.filesToReanalyze).toEqual([]);
+    expect(changedFiles).toBe('');
+  });
+
+  it('applies a new explicit exclude against the current inventory at the same commit', () => {
+    const { root, baseCommit } = setupRepository({
+      'src/a.ts': 'export const a = 1;\n',
+      'src/b.ts': 'export const b = 2;\n',
+      'src/c.ts': 'export const c = 3;\n',
+      'feature/old.ts': 'export const old = true;\n',
+    });
+
+    const { plan, scan } = prepare(root, baseCommit, ['--exclude', 'feature/']);
+    expect(plan.headCommit).toBe(baseCommit);
+    expect(plan.filesToReanalyze).toEqual([]);
+    expect(plan.deletedFiles).toEqual(['feature/old.ts']);
+    expect(scan.files.map(file => file.path)).not.toContain('feature/old.ts');
+  });
+
+  it('conservatively analyzes an existing non-code file missing from a legacy fingerprint baseline', () => {
+    const { root, baseCommit } = setupRepository({
+      'src/a.ts': 'export const a = 1;\n',
+      'src/b.ts': 'export const b = 2;\n',
+      'src/c.ts': 'export const c = 3;\n',
+      'docs/guide.md': '# Guide\n\nOld body.\n',
+    });
+    const fingerprintPath = join(root, '.ua', 'fingerprints.json');
+    const fingerprints = JSON.parse(readFileSync(fingerprintPath, 'utf-8'));
+    delete fingerprints.files['docs/guide.md'];
+    writeFileSync(fingerprintPath, JSON.stringify(fingerprints), 'utf-8');
+    writeProjectFile(root, 'docs/guide.md', '# Guide\n\nNew body.\n');
+    commit(root, 'update legacy-unfingerprinted docs');
+
+    const { plan } = prepare(root, baseCommit);
+    expect(plan.filesToReanalyze).toEqual(['docs/guide.md']);
+    expect(plan.reason).toContain('structural changes');
   });
 
   it('classifies implementation-only edits as SKIP and advances fingerprints via finalize', () => {
@@ -428,5 +545,74 @@ describe('finalize-incremental.mjs', { timeout: 30_000 }, () => {
     expect(graph.tour[0].title).toBe('Overview');
     expect(graph.tour[0].description).toBe('Read the project');
     expect(graph.tour[0].nodeIds.every(id => graph.nodes.some(node => node.id === id))).toBe(true);
+    const fingerprints = JSON.parse(
+      readFileSync(join(root, '.ua', 'fingerprints.json'), 'utf-8'),
+    );
+    expect(fingerprints.gitCommitHash).toBe(headCommit);
+    expect(fingerprints.files).toHaveProperty('src/api/new.ts');
+    expect(Object.keys(fingerprints.files)).toHaveLength(5);
+  });
+
+  it('does not advance graph, fingerprints, or meta when assembled output is missing', () => {
+    const { root, baseCommit } = setupRepository({
+      'src/a.ts': 'export const a = 1;\n',
+      'src/b.ts': 'export const b = 2;\n',
+      'src/c.ts': 'export const c = 3;\n',
+      'src/d.ts': 'export const d = 4;\n',
+    });
+    const graphPath = join(root, '.ua', 'knowledge-graph.json');
+    const fingerprintPath = join(root, '.ua', 'fingerprints.json');
+    const metaPath = join(root, '.ua', 'meta.json');
+    const graphBefore = readFileSync(graphPath, 'utf-8');
+    const fingerprintsBefore = readFileSync(fingerprintPath, 'utf-8');
+    const metaBefore = readFileSync(metaPath, 'utf-8');
+    writeProjectFile(root, 'src/a.ts', 'export const renamed = 1;\n');
+    commit(root, 'structural change');
+    prepare(root, baseCommit);
+
+    const result = spawnSync(process.execPath, [finalizeScript, root], {
+      cwd: root,
+      encoding: 'utf-8',
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('assembled-graph.json is missing or invalid');
+    expect(readFileSync(graphPath, 'utf-8')).toBe(graphBefore);
+    expect(readFileSync(fingerprintPath, 'utf-8')).toBe(fingerprintsBefore);
+    expect(readFileSync(metaPath, 'utf-8')).toBe(metaBefore);
+  });
+
+  it('does not advance the baseline when analyzer output omits a changed file node', () => {
+    const { root, baseCommit } = setupRepository({
+      'src/a.ts': 'export const a = 1;\n',
+      'src/b.ts': 'export const b = 2;\n',
+      'src/c.ts': 'export const c = 3;\n',
+      'src/d.ts': 'export const d = 4;\n',
+    });
+    const graphPath = join(root, '.ua', 'knowledge-graph.json');
+    const fingerprintPath = join(root, '.ua', 'fingerprints.json');
+    const metaPath = join(root, '.ua', 'meta.json');
+    const graphBefore = readFileSync(graphPath, 'utf-8');
+    const fingerprintsBefore = readFileSync(fingerprintPath, 'utf-8');
+    const metaBefore = readFileSync(metaPath, 'utf-8');
+    writeProjectFile(root, 'src/a.ts', 'export const renamed = 1;\n');
+    commit(root, 'structural change omitted by analyzer');
+    prepare(root, baseCommit);
+
+    const intermediate = join(root, '.ua', 'intermediate');
+    const retained = JSON.parse(readFileSync(join(intermediate, 'batch-existing.json'), 'utf-8'));
+    writeFileSync(
+      join(intermediate, 'assembled-graph.json'),
+      JSON.stringify(retained),
+      'utf-8',
+    );
+    const result = spawnSync(process.execPath, [finalizeScript, root], {
+      cwd: root,
+      encoding: 'utf-8',
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('missing whole-file nodes for analyzed paths: src/a.ts');
+    expect(readFileSync(graphPath, 'utf-8')).toBe(graphBefore);
+    expect(readFileSync(fingerprintPath, 'utf-8')).toBe(fingerprintsBefore);
+    expect(readFileSync(metaPath, 'utf-8')).toBe(metaBefore);
   });
 });

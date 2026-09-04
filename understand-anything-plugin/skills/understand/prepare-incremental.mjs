@@ -80,6 +80,14 @@ function isGeneratedArtifact(path) {
   return GENERATED_ROOTS.has(path.split('/')[0]);
 }
 
+function isImportResolverConfig(path) {
+  const name = path.split('/').at(-1);
+  return name === 'tsconfig.json'
+    || name === 'go.mod'
+    || name === 'composer.json'
+    || name === 'Package.swift';
+}
+
 function readJson(path, fallback = null) {
   if (!existsSync(path)) return fallback;
   try {
@@ -485,7 +493,17 @@ async function main() {
   const missingImportEntries = currentInventory.filter(
     path => !Object.hasOwn(oldScan?.importMap ?? {}, path),
   );
-  const importAnalysisPaths = sorted([...filesToReanalyze, ...missingImportEntries]);
+  // Adding/removing a resolution candidate can change an unchanged importer's
+  // winner (foo.ts vs foo.js vs foo/index.ts). Resolver configuration edits
+  // likewise affect importers that did not change. Recompute the complete map
+  // for those inventory/context changes; ordinary file edits remain selective.
+  const importResolutionContextChanged =
+    analysis.newFiles.length > 0
+    || deletedFiles.length > 0
+    || currentChangedPaths.some(isImportResolverConfig);
+  const importAnalysisPaths = importResolutionContextChanged
+    ? currentInventory
+    : sorted([...filesToReanalyze, ...missingImportEntries]);
   const importMap = refreshImportMap({
     projectRoot,
     intermediateDir,
@@ -579,6 +597,7 @@ if (isCliEntry()) {
 
 export {
   isGeneratedArtifact,
+  isImportResolverConfig,
   normalizeRelativePath,
   parseNameStatusZ,
   pruneExistingGraph,

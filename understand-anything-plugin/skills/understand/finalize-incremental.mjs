@@ -348,6 +348,13 @@ function main() {
     const assembled = normalizeAssembled(assembledRaw);
     const nodeIds = new Set(assembled.nodes.map(node => node.id));
     const pathIndex = buildPathIndex(assembled.nodes);
+    const missingAnalyzedPaths = plan.filesToReanalyze.filter(path => !pathIndex.has(path));
+    if (missingAnalyzedPaths.length > 0) {
+      throw new Error(
+        `Assembled graph is missing whole-file nodes for analyzed paths: ` +
+        `${missingAnalyzedPaths.join(', ')}; baseline not advanced`,
+      );
+    }
     if (plan.rerunArchitecture && !existsSync(join(intermediateDir, 'layers.json'))) {
       throw new Error('Architecture update requires layers.json; baseline not advanced');
     }
