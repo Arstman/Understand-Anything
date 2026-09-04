@@ -1583,6 +1583,9 @@ describe('extract-import-map.mjs — per-file failure resilience', () => {
     expect(result.output.importMap['src/other.ts']).toEqual([]);
     // Missing file is in importMap with []
     expect(result.output.importMap['src/missing.ts']).toEqual([]);
+    expect(result.output.failures).toEqual([
+      expect.objectContaining({ path: 'src/missing.ts', stage: 'file-read' }),
+    ]);
     // A warning was emitted on stderr for the missing file
     expect(result.stderr).toMatch(/Warning: extract-import-map: import resolution failed for src\/missing\.ts/);
     expect(result.stderr).toMatch(/importMap\[src\/missing\.ts\]=\[\]/);
@@ -1638,6 +1641,7 @@ describe('extract-import-map.mjs — output schema invariants', () => {
     });
 
     expect(result.status).toBe(0);
+    expect(result.output.failures).toEqual([]);
     expect(Object.keys(result.output.importMap).sort()).toEqual([
       'Dockerfile', 'README.md', 'a.ts', 'package.json',
     ]);
@@ -1933,6 +1937,9 @@ describe('extract-import-map.mjs — tsconfig parse resilience', () => {
     expect(result.stderr).toMatch(/path aliases.*will not be applied/);
     // Aliased import unresolved; relative import still resolves.
     expect(result.output.importMap['src/index.ts']).toEqual(['src/sibling.ts']);
+    expect(result.output.failures).toEqual([
+      expect.objectContaining({ path: 'tsconfig.json', stage: 'resolver-config-parse' }),
+    ]);
   });
 
   it('falls back to raw-text parse when a paths value contains "//" that the stripper would damage', () => {
@@ -2083,6 +2090,9 @@ describe('extract-import-map.mjs — tree-sitter init graceful failure', () => {
     expect(result.output.stats.filesScanned).toBe(2);
     expect(result.output.stats.filesWithImports).toBe(0);
     expect(result.output.stats.totalEdges).toBe(0);
+    expect(result.output.failures).toEqual([
+      expect.objectContaining({ path: null, stage: 'tree-sitter-init' }),
+    ]);
   });
 });
 

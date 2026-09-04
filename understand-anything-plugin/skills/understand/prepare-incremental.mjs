@@ -381,7 +381,17 @@ function refreshImportMap({ projectRoot, intermediateDir, oldScan, currentScan, 
     analysisPaths,
   });
   run(process.execPath, [IMPORT_SCRIPT, inputPath, outputPath]);
-  const selective = readJson(outputPath)?.importMap ?? {};
+  const extraction = readJson(outputPath);
+  const failures = Array.isArray(extraction?.failures) ? extraction.failures : [];
+  if (failures.length > 0) {
+    const preview = failures
+      .slice(0, 5)
+      .map(failure => `${failure.path ?? '<global>'} (${failure.stage})`)
+      .join(', ');
+    const suffix = failures.length > 5 ? ` (+${failures.length - 5} more)` : '';
+    throw new Error(`Import extraction reported failures: ${preview}${suffix}`);
+  }
+  const selective = extraction?.importMap ?? {};
   const currentPaths = new Set(currentScan.files.map(file => file.path));
   const importMap = {};
   for (const file of currentScan.files) {

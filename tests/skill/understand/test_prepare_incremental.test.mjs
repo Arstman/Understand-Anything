@@ -385,6 +385,40 @@ describe('prepare-incremental.mjs', { timeout: 30_000 }, () => {
     expect(scan.importMap['src/index.ts']).toEqual(['alternate/foo.ts']);
   });
 
+  it('aborts without advancing baselines when import extraction reports a config failure', () => {
+    const { root, baseCommit } = setupRepository({
+      'tsconfig.json': JSON.stringify({
+        compilerOptions: { baseUrl: '.', paths: { '@/*': ['src/*'] } },
+      }),
+      'src/index.ts': "import { value } from '@/foo';\nexport { value };\n",
+      'src/foo.ts': 'export const value = 1;\n',
+      'src/a.ts': 'export const a = 1;\n',
+    });
+    const graphPath = join(root, '.ua', 'knowledge-graph.json');
+    const fingerprintPath = join(root, '.ua', 'fingerprints.json');
+    const metaPath = join(root, '.ua', 'meta.json');
+    const scanPath = join(root, '.ua', 'intermediate', 'scan-result.json');
+    const graphBefore = readFileSync(graphPath, 'utf-8');
+    const fingerprintsBefore = readFileSync(fingerprintPath, 'utf-8');
+    const metaBefore = readFileSync(metaPath, 'utf-8');
+    const scanBefore = readFileSync(scanPath, 'utf-8');
+    writeProjectFile(root, 'tsconfig.json', '{"compilerOptions":{"paths":');
+    commit(root, 'break resolver config');
+
+    const result = spawnSync(process.execPath, [prepareScript, root, baseCommit], {
+      cwd: root,
+      encoding: 'utf-8',
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      'Import extraction reported failures: tsconfig.json (resolver-config-parse)',
+    );
+    expect(readFileSync(graphPath, 'utf-8')).toBe(graphBefore);
+    expect(readFileSync(fingerprintPath, 'utf-8')).toBe(fingerprintsBefore);
+    expect(readFileSync(metaPath, 'utf-8')).toBe(metaBefore);
+    expect(readFileSync(scanPath, 'utf-8')).toBe(scanBefore);
+  });
+
   it('refreshes supplemental require imports even when fingerprints classify the edit as cosmetic', () => {
     const { root, baseCommit } = setupRepository({
       'src/index.js': "const value = require('./a');\nmodule.exports = value;\n",

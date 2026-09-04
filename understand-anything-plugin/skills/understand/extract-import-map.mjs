@@ -263,6 +263,7 @@ function parseTsConfigText(raw) {
 async function loadTsConfigs(projectRoot, files) {
   const out = new Map();
   const warnings = [];
+  const failures = [];
   // Collect the candidate paths in the original file order before reading,
   // so warning emit order matches the previous sequential implementation.
   const candidates = [];
@@ -277,6 +278,7 @@ async function loadTsConfigs(projectRoot, files) {
   const reads = await readFilesParallel(candidates);
   for (const { key: p, raw, err } of reads) {
     if (err) {
+      failures.push({ path: p, stage: 'resolver-config-read', message: err.message });
       // absPath isn't carried through the helper return shape; reconstruct it.
       warnings.push(
         `Warning: extract-import-map: tsconfig.json at ${join(projectRoot, p)} failed ` +
@@ -287,6 +289,11 @@ async function loadTsConfigs(projectRoot, files) {
     }
     const parsed = parseTsConfigText(raw);
     if (!parsed) {
+      failures.push({
+        path: p,
+        stage: 'resolver-config-parse',
+        message: 'invalid tsconfig.json',
+      });
       warnings.push(
         `Warning: extract-import-map: tsconfig.json at ${join(projectRoot, p)} failed ` +
         `to parse — path aliases from this config will not be applied ` +
@@ -296,7 +303,7 @@ async function loadTsConfigs(projectRoot, files) {
     }
     out.set(dirOf(p), parsed);
   }
-  return { configs: out, warnings };
+  return { configs: out, warnings, failures };
 }
 
 /**
@@ -331,6 +338,7 @@ async function loadGoModules(projectRoot, files) {
   // so the concurrent caller in buildResolutionContext can drain them
   // uniformly in canonical order.
   const warnings = [];
+  const failures = [];
   const candidates = [];
   for (const f of files) {
     const p = toPosix(f.path);
@@ -342,7 +350,14 @@ async function loadGoModules(projectRoot, files) {
   }
   const reads = await readFilesParallel(candidates);
   for (const { key: p, raw, err } of reads) {
-    if (err) continue;
+    if (err) {
+      failures.push({ path: p, stage: 'resolver-config-read', message: err.message });
+      warnings.push(
+        `Warning: extract-import-map: go.mod at ${join(projectRoot, p)} failed ` +
+        `to read (${err.message}) — Go module imports may not resolve\n`,
+      );
+      continue;
+    }
     let moduleName = '';
     for (const line of raw.split(/\r?\n/)) {
       const trimmed = line.replace(/\/\/.*$/, '').trim();
@@ -350,10 +365,21 @@ async function loadGoModules(projectRoot, files) {
       moduleName = trimmed.slice('module '.length).trim();
       break;
     }
-    if (!moduleName) continue;
+    if (!moduleName) {
+      failures.push({
+        path: p,
+        stage: 'resolver-config-parse',
+        message: 'module directive missing',
+      });
+      warnings.push(
+        `Warning: extract-import-map: go.mod at ${join(projectRoot, p)} has no ` +
+        `module directive — Go module imports may not resolve\n`,
+      );
+      continue;
+    }
     out.set(dirOf(p), moduleName);
   }
-  return { modules: out, warnings };
+  return { modules: out, warnings, failures };
 }
 
 /**
@@ -425,6 +451,7 @@ function parseSwiftPackageTargets(raw) {
 async function loadSwiftPackageTargets(projectRoot, files) {
   const targets = new Map();
   const warnings = [];
+  const failures = [];
   const candidates = [];
 
   for (const f of files) {
@@ -438,7 +465,14 @@ async function loadSwiftPackageTargets(projectRoot, files) {
 
   const reads = await readFilesParallel(candidates);
   for (const { key: p, raw, err } of reads) {
-    if (err) continue;
+    if (err) {
+      failures.push({ path: p, stage: 'resolver-config-read', message: err.message });
+      warnings.push(
+        `Warning: extract-import-map: Package.swift at ${join(projectRoot, p)} failed ` +
+        `to read (${err.message}) — Swift module imports may not resolve\n`,
+      );
+      continue;
+    }
     const packageDir = dirOf(p);
     for (const target of parseSwiftPackageTargets(raw)) {
       const targetPath = resolveRelative(packageDir, target.path.replace(/\\/g, '/'));
@@ -448,7 +482,7 @@ async function loadSwiftPackageTargets(projectRoot, files) {
     }
   }
 
-  return { targets, warnings };
+  return { targets, warnings, failures };
 }
 
 /**
@@ -558,6 +592,12 @@ async function buildResolutionContext(projectRoot, files) {
     scalaPackageIndex,
     csIndex,
     swiftModuleIndex,
+    failures: [
+      ...tsResult.failures,
+      ...goResult.failures,
+      ...phpResult.failures,
+      ...swiftResult.failures,
+    ],
     phpAutoloads,
     // Dedupe Sets for one-time-per-file warnings. Keyed by importer file
     // path. Mutated by resolvers.
@@ -1490,6 +1530,7 @@ function parseComposerAutoloadText(raw) {
 async function loadPhpAutoloads(projectRoot, files) {
   const out = new Map();
   const warnings = [];
+  const failures = [];
   const candidates = [];
   for (const f of files) {
     const p = toPosix(f.path);
@@ -1502,6 +1543,7 @@ async function loadPhpAutoloads(projectRoot, files) {
   const reads = await readFilesParallel(candidates);
   for (const { key: p, raw, err } of reads) {
     if (err) {
+      failures.push({ path: p, stage: 'resolver-config-read', message: err.message });
       warnings.push(
         `Warning: extract-import-map: composer.json at ${join(projectRoot, p)} failed ` +
         `to read (${err.message}) — PSR-4 namespace mapping from this ` +
@@ -1512,6 +1554,11 @@ async function loadPhpAutoloads(projectRoot, files) {
     }
     const parsed = parseComposerAutoloadText(raw);
     if (parsed === null) {
+      failures.push({
+        path: p,
+        stage: 'resolver-config-parse',
+        message: 'invalid composer.json',
+      });
       warnings.push(
         `Warning: extract-import-map: composer.json at ${join(projectRoot, p)} failed ` +
         `to parse — PSR-4 namespace mapping unavailable — PHP imports ` +
@@ -1521,7 +1568,7 @@ async function loadPhpAutoloads(projectRoot, files) {
     }
     out.set(dirOf(p), parsed);
   }
-  return { autoloads: out, warnings };
+  return { autoloads: out, warnings, failures };
 }
 
 /**
@@ -1868,6 +1915,7 @@ async function main() {
     const output = {
       scriptCompleted: true,
       stats: { filesScanned: 0, filesWithImports: 0, totalEdges: 0 },
+      failures: [],
       importMap: {},
     };
     writeFileSync(outputPath, JSON.stringify(output, null, 2), 'utf-8');
@@ -1888,6 +1936,7 @@ async function main() {
   // (file inventory, exports inferred from filenames, etc.) keeps working.
   let registry = null;
   let treeSitterReady = false;
+  const failures = [];
   try {
     const tsConfigs = builtinLanguageConfigs.filter(c => c.treeSitter);
     const tsPlugin = new TreeSitterPlugin(tsConfigs);
@@ -1897,6 +1946,7 @@ async function main() {
     registerAllParsers(registry);
     treeSitterReady = true;
   } catch (err) {
+    failures.push({ path: null, stage: 'tree-sitter-init', message: err.message });
     process.stderr.write(
       `Warning: extract-import-map: tree-sitter init failed ` +
       `(${err.message}) — all importMap entries will be empty — ` +
@@ -1908,6 +1958,7 @@ async function main() {
   // tsconfig/go.mod/composer.json files inside is parallelised — see
   // `buildResolutionContext`.
   const ctx = await buildResolutionContext(projectRoot, files);
+  failures.push(...ctx.failures);
 
   const importMap = {};
   let filesWithImports = 0;
@@ -1937,6 +1988,7 @@ async function main() {
     try {
       content = readFileSync(absolutePath, 'utf-8');
     } catch (err) {
+      failures.push({ path, stage: 'file-read', message: err.message });
       process.stderr.write(
         `Warning: extract-import-map: import resolution failed for ${path} ` +
         `(read error: ${err.message}) — importMap[${path}]=[]\n`,
@@ -1988,6 +2040,7 @@ async function main() {
           : comparePaths(a, b),
       );
     } catch (err) {
+      failures.push({ path, stage: 'file-analyze', message: err.message });
       process.stderr.write(
         `Warning: extract-import-map: import resolution failed for ${path} ` +
         `(analyze error: ${err.message}) — importMap[${path}]=[]\n`,
@@ -2010,6 +2063,7 @@ async function main() {
       filesWithImports,
       totalEdges,
     },
+    failures,
     importMap,
   };
 
