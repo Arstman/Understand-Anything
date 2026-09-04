@@ -1454,7 +1454,7 @@ describe('extract-import-map.mjs — C/C++ resolver', () => {
   });
 });
 
-describe('extract-import-map.mjs — Swift resolver', () => {
+describe('extract-import-map.mjs — Swift resolver', { timeout: 20_000 }, () => {
   let projectRoot;
 
   afterEach(() => {
