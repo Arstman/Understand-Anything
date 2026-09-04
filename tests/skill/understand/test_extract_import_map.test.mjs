@@ -180,6 +180,57 @@ describe('extract-import-map.mjs — TypeScript / JavaScript resolver', () => {
     },
   );
 
+  it.skipIf(process.platform === 'win32')(
+    'accepts Windows-looking paths as project-relative POSIX filenames',
+    () => {
+      projectRoot = setupTree({
+        'C:/drive-slash.js': 'module.exports = 1;\n',
+        'C:\\drive-backslash.js': 'module.exports = 2;\n',
+        '\\root-backslash.js': 'module.exports = 3;\n',
+      });
+
+      const paths = [
+        'C:/drive-slash.js',
+        'C:\\drive-backslash.js',
+        '\\root-backslash.js',
+      ];
+      const result = runScript(projectRoot, {
+        projectRoot,
+        files: paths.map(path => ({
+          path,
+          language: 'javascript',
+          fileCategory: 'code',
+        })),
+        analysisPaths: paths,
+      });
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.output.importMap).toEqual(Object.fromEntries(
+        paths.map(path => [path, []]),
+      ));
+    },
+  );
+
+  it('rejects host-absolute analysis paths', () => {
+    projectRoot = setupTree({
+      'src/index.ts': 'export const value = 1;\n',
+    });
+    const absolutePath = process.platform === 'win32'
+      ? 'C:\\outside\\index.ts'
+      : '/outside/index.ts';
+
+    const result = runScript(projectRoot, {
+      projectRoot,
+      files: [
+        { path: 'src/index.ts', language: 'typescript', fileCategory: 'code' },
+      ],
+      analysisPaths: [absolutePath],
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('analysisPaths entry must be project-relative');
+  });
+
   it('orders Unicode import targets by locale-independent UTF-16 code units', () => {
     projectRoot = setupTree({
       'src/index.ts': `import './ä';\nimport './Z';\nimport './a';\n`,

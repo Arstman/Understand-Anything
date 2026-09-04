@@ -40,7 +40,7 @@
  */
 
 import { createRequire } from 'node:module';
-import { dirname, resolve, join, posix } from 'node:path';
+import { dirname, resolve, join, posix, isAbsolute } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -128,7 +128,10 @@ function selectAnalysisFiles(files, analysisPaths) {
     if (typeof rawPath !== 'string' || rawPath.length === 0) {
       throw new Error('Invalid input: every analysisPaths entry must be a non-empty string');
     }
-    if (/^(?:[A-Za-z]:[\\/]|[\\/])/.test(rawPath)) {
+    // Use the host's path semantics here. On POSIX, backslashes and drive-like
+    // prefixes are ordinary project-relative filename characters; on Windows,
+    // path.isAbsolute also rejects drive-rooted and root-relative paths.
+    if (isAbsolute(rawPath)) {
       throw new Error(`Invalid input: analysisPaths entry must be project-relative: ${rawPath}`);
     }
     const path = toPosix(rawPath);
