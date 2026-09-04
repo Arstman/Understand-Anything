@@ -504,6 +504,62 @@ describe('prepare-incremental.mjs', { timeout: 30_000 }, () => {
     const meta = JSON.parse(readFileSync(join(root, '.ua', 'meta.json'), 'utf-8'));
     expect(meta.gitCommitHash).toBe(baseCommit);
   });
+
+  it('refuses to stamp HEAD when an analyzable untracked file is present', () => {
+    const { root, baseCommit } = setupRepository({
+      'src/a.ts': 'export const a = 1;\n',
+      'src/b.ts': 'export const b = 2;\n',
+      'src/c.ts': 'export const c = 3;\n',
+      'src/d.ts': 'export const d = 4;\n',
+    });
+    const metaPath = join(root, '.ua', 'meta.json');
+    const metaBefore = readFileSync(metaPath, 'utf-8');
+    writeProjectFile(root, 'src/a.ts', 'export const renamed = 1;\n');
+    commit(root, 'committed structural change');
+    writeProjectFile(root, 'src/uncommitted.ts', 'export const dirty = true;\n');
+
+    const result = spawnSync(process.execPath, [prepareScript, root, baseCommit], {
+      cwd: root,
+      encoding: 'utf-8',
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('relevant uncommitted changes: src/uncommitted.ts');
+    expect(readFileSync(metaPath, 'utf-8')).toBe(metaBefore);
+  });
+
+  it('refuses a partial-commit update when another analyzed file is still unstaged', () => {
+    const { root, baseCommit } = setupRepository({
+      'src/a.ts': 'export const a = 1;\n',
+      'src/b.ts': 'export const b = 2;\n',
+      'src/c.ts': 'export const c = 3;\n',
+      'src/d.ts': 'export const d = 4;\n',
+    });
+    writeProjectFile(root, 'src/a.ts', 'export const renamed = 1;\n');
+    commit(root, 'partial commit');
+    writeProjectFile(root, 'src/b.ts', 'export const stillDirty = 2;\n');
+
+    const result = spawnSync(process.execPath, [prepareScript, root, baseCommit], {
+      cwd: root,
+      encoding: 'utf-8',
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('relevant uncommitted changes: src/b.ts');
+  });
+
+  it('allows uncommitted files excluded by deterministic analysis rules', () => {
+    const { root, baseCommit } = setupRepository({
+      'src/a.ts': 'export const a = 1;\n',
+      'src/b.ts': 'export const b = 2;\n',
+      'src/c.ts': 'export const c = 3;\n',
+      'src/d.ts': 'export const d = 4;\n',
+    });
+    writeProjectFile(root, 'src/a.ts', 'export const renamed = 1;\n');
+    commit(root, 'committed structural change');
+    writeProjectFile(root, 'dist/untracked.js', 'generated();\n');
+
+    const { plan } = prepare(root, baseCommit);
+    expect(plan.filesToReanalyze).toEqual(['src/a.ts']);
+  });
 });
 
 describe('finalize-incremental.mjs', { timeout: 30_000 }, () => {

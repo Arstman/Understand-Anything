@@ -53,6 +53,7 @@ const {
   buildFingerprintStore,
   compareFingerprints,
   classifyUpdate,
+  createIgnoreFilter,
   resolveUaDir,
 } = core;
 
@@ -171,6 +172,42 @@ function pathsFromChanges(changes) {
     if (change.newPath) paths.push(change.newPath);
   }
   return sorted(paths);
+}
+
+function parseNulPaths(output) {
+  return output
+    .split('\0')
+    .map(normalizeRelativePath)
+    .filter(Boolean);
+}
+
+function relevantWorktreeChanges(projectRoot, excludePatterns) {
+  const paths = sorted([
+    ...parseNulPaths(run(
+      'git',
+      ['diff', '--cached', '--name-only', '-z', '--relative', '--', '.'],
+      { cwd: projectRoot },
+    )),
+    ...parseNulPaths(run(
+      'git',
+      ['diff', '--name-only', '-z', '--relative', '--', '.'],
+      { cwd: projectRoot },
+    )),
+    ...parseNulPaths(run(
+      'git',
+      ['ls-files', '--others', '--exclude-standard', '-z', '--', '.'],
+      { cwd: projectRoot },
+    )),
+  ]);
+  const ignoreFilter = createIgnoreFilter(projectRoot, excludePatterns);
+  return paths.filter(path => {
+    if (isGeneratedArtifact(path)) return false;
+    const name = path.split('/').at(-1);
+    // These control which files the live scanner can see, so a dirty version
+    // is relevant even though the control file itself is not analyzed.
+    if (name === '.gitignore' || name === '.understandignore') return true;
+    return !ignoreFilter.isIgnored(path);
+  });
 }
 
 function normalizeFingerprintStore(raw, baseCommit) {
@@ -398,6 +435,15 @@ async function main() {
 
   const baseCommit = resolveCommit(projectRoot, args.baseCommit);
   const headCommit = resolveCommit(projectRoot, 'HEAD');
+  const dirtyPaths = relevantWorktreeChanges(projectRoot, args.excludePatterns);
+  if (dirtyPaths.length > 0) {
+    const preview = dirtyPaths.slice(0, 10).join(', ');
+    const suffix = dirtyPaths.length > 10 ? ` (+${dirtyPaths.length - 10} more)` : '';
+    throw new Error(
+      `Working tree has relevant uncommitted changes: ${preview}${suffix}. ` +
+      `Commit or stash them before incremental analysis so the HEAD baseline remains reproducible.`,
+    );
+  }
   const changes = parseNameStatusZ(
     run(
       'git',
@@ -599,6 +645,7 @@ export {
   isGeneratedArtifact,
   isImportResolverConfig,
   normalizeRelativePath,
+  relevantWorktreeChanges,
   parseNameStatusZ,
   pruneExistingGraph,
 };
