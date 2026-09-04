@@ -1962,6 +1962,36 @@ describe('extract-import-map.mjs — tsconfig parse resilience', () => {
     ]);
   });
 
+  it('accepts JSONC comments and trailing commas without reporting a failure', () => {
+    projectRoot = setupTree({
+      'tsconfig.json': `{
+        // aliases may point at URL-like strings without losing // in quotes
+        "compilerOptions": {
+          "baseUrl": ".",
+          "paths": {
+            "@/*": ["src/*",],
+            "@url/*": ["https://example.test/*",],
+          },
+        },
+      }`,
+      'src/index.ts': `import { value } from '@/value';\n`,
+      'src/value.ts': 'export const value = 1;\n',
+    });
+
+    const result = runScript(projectRoot, {
+      projectRoot,
+      files: [
+        { path: 'tsconfig.json', language: 'json', fileCategory: 'config' },
+        { path: 'src/index.ts', language: 'typescript', fileCategory: 'code' },
+        { path: 'src/value.ts', language: 'typescript', fileCategory: 'code' },
+      ],
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.output.failures).toEqual([]);
+    expect(result.output.importMap['src/index.ts']).toEqual(['src/value.ts']);
+  });
+
   it('falls back to raw-text parse when a paths value contains "//" that the stripper would damage', () => {
     // tsconfig with NO comments but a string literal containing "//". The
     // naive stripper would chew the second `//` away and break the JSON;

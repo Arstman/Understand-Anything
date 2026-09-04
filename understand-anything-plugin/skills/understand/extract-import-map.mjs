@@ -204,16 +204,74 @@ function dirOf(p) {
  * with the exact tsconfig path that failed; bubbling the error would
  * conceal which file was at fault when many tsconfigs are loaded.
  */
+function normalizeJsonc(raw) {
+  let withoutComments = '';
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    const next = raw[i + 1];
+    if (inString) {
+      withoutComments += ch;
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      withoutComments += ch;
+      continue;
+    }
+    if (ch === '/' && next === '/') {
+      while (i < raw.length && raw[i] !== '\n') i++;
+      if (i < raw.length) withoutComments += '\n';
+      continue;
+    }
+    if (ch === '/' && next === '*') {
+      i += 2;
+      while (i < raw.length && !(raw[i] === '*' && raw[i + 1] === '/')) {
+        if (raw[i] === '\n') withoutComments += '\n';
+        i++;
+      }
+      i++;
+      continue;
+    }
+    withoutComments += ch;
+  }
+
+  let normalized = '';
+  inString = false;
+  escaped = false;
+  for (let i = 0; i < withoutComments.length; i++) {
+    const ch = withoutComments[i];
+    if (inString) {
+      normalized += ch;
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      normalized += ch;
+      continue;
+    }
+    if (ch === ',') {
+      let nextIndex = i + 1;
+      while (/\s/.test(withoutComments[nextIndex] ?? '')) nextIndex++;
+      if (withoutComments[nextIndex] === '}' || withoutComments[nextIndex] === ']') continue;
+    }
+    normalized += ch;
+  }
+  return normalized.replace(/^\uFEFF/, '');
+}
+
 function parseTsConfigText(raw) {
-  // tsconfig.json often contains JSONC-style comments; strip line and block
-  // comments before parsing. The strip is naive (it doesn't honor string
-  // contents), so we fall back to the raw text on failure.
-  const stripped = raw
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const normalized = normalizeJsonc(raw);
   let parsed;
   try {
-    parsed = JSON.parse(stripped);
+    parsed = JSON.parse(normalized);
   } catch {
     try {
       parsed = JSON.parse(raw);
