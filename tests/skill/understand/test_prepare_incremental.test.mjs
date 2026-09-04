@@ -66,6 +66,9 @@ function setupRepository(files) {
   git(root, ['init', '-b', 'main']);
   git(root, ['config', 'user.email', 'test@example.com']);
   git(root, ['config', 'user.name', 'Test User']);
+  // Keep fixture bytes literal on Windows so the LF -> CRLF regression
+  // actually creates a commit instead of being normalized back to LF.
+  git(root, ['config', 'core.autocrlf', 'false']);
   writeProjectFile(root, '.gitignore', '.ua/\n.understand-anything/\n');
   for (const [path, content] of Object.entries(files)) writeProjectFile(root, path, content);
   const baseCommit = commit(root, 'baseline');
