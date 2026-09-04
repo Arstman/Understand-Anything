@@ -276,7 +276,10 @@ async function buildCurrentFingerprints(projectRoot, paths, headCommit) {
     const registry = new PluginRegistry();
     registry.register(treeSitter);
     registerAllParsers(registry);
-    return buildFingerprintStore(projectRoot, paths, registry, headCommit);
+    const structuralFingerprintLanguages = new Set(tsConfigs.map(config => config.id));
+    return buildFingerprintStore(projectRoot, paths, registry, headCommit, {
+      structuralFingerprintLanguages,
+    });
   } catch (error) {
     process.stderr.write(
       `Warning: prepare-incremental: structural parser initialization failed ` +

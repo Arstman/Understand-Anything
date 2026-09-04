@@ -417,6 +417,24 @@ describe('prepare-incremental.mjs', { timeout: 30_000 }, () => {
     expect(plan.reason).toContain('structural changes');
   });
 
+  it('treats parsed non-code content changes as structural', () => {
+    const { root, baseCommit } = setupRepository({
+      'src/a.ts': 'export const a = 1;\n',
+      'src/b.ts': 'export const b = 2;\n',
+      'src/c.ts': 'export const c = 3;\n',
+      'docs/guide.md': '# Guide\n\nOld body.\n',
+    });
+    const fingerprints = JSON.parse(
+      readFileSync(join(root, '.ua', 'fingerprints.json'), 'utf-8'),
+    );
+    expect(fingerprints.files['docs/guide.md'].hasStructuralAnalysis).toBe(false);
+    writeProjectFile(root, 'docs/guide.md', '# Guide\n\nNew body.\n');
+    commit(root, 'update parsed non-code content');
+
+    const { plan } = prepare(root, baseCommit);
+    expect(plan.filesToReanalyze).toEqual(['docs/guide.md']);
+  });
+
   it('classifies implementation-only edits as SKIP and advances fingerprints via finalize', () => {
     const { root, baseCommit } = setupRepository({
       'src/a.ts': 'export function value() { return 1; }\n',

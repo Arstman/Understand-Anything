@@ -89,7 +89,10 @@ async function main() {
   registry.register(tsPlugin);
   registerAllParsers(registry);
 
-  const store = buildFingerprintStore(projectRoot, filePaths, registry, gitCommitHash);
+  const structuralFingerprintLanguages = new Set(tsConfigs.map(config => config.id));
+  const store = buildFingerprintStore(projectRoot, filePaths, registry, gitCommitHash, {
+    structuralFingerprintLanguages,
+  });
   saveFingerprints(projectRoot, store);
 
   const fileCount = Object.keys(store.files).length;
