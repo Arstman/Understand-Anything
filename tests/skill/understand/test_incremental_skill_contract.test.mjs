@@ -35,5 +35,7 @@ describe('incremental execution contract', () => {
     expect(skill).toContain('where `rerunArchitecture === true`');
     expect(skill).toContain('where `rerunTour === true`');
     expect(skill).toContain('`FULL_UPDATE`');
+    expect(skill).toContain('With explicit `--review`');
+    expect(skill).toContain('jump to the `--review` graph-reviewer path in Phase 6');
   });
 });
