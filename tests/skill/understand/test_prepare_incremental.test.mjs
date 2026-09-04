@@ -342,6 +342,27 @@ describe('prepare-incremental.mjs', { timeout: 30_000 }, () => {
     expect(scan.importMap['src/index.ts']).toEqual(['alternate/foo.ts']);
   });
 
+  it('refreshes supplemental require imports even when fingerprints classify the edit as cosmetic', () => {
+    const { root, baseCommit } = setupRepository({
+      'src/index.js': "const value = require('./a');\nmodule.exports = value;\n",
+      'src/a.js': 'module.exports = 1;\n',
+      'src/b.js': 'module.exports = 2;\n',
+      'src/c.js': 'module.exports = 3;\n',
+    });
+    writeProjectFile(
+      root,
+      'src/index.js',
+      "const value = require('./b');\nmodule.exports = value;\n",
+    );
+    commit(root, 'change supplemental require');
+
+    const { plan, scan } = prepare(root, baseCommit);
+    expect(plan.action).toBe('SKIP');
+    expect(plan.cosmeticFiles).toEqual(['src/index.js']);
+    expect(plan.filesToReanalyze).toEqual([]);
+    expect(scan.importMap['src/index.js']).toEqual(['src/b.js']);
+  });
+
   it('treats LF-to-CRLF conversion as cosmetic and schedules no analyzer', () => {
     const { root, baseCommit } = setupRepository({
       'src/a.ts': 'export function value() {\n  return 1;\n}\n',

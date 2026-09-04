@@ -503,7 +503,7 @@ async function main() {
     || currentChangedPaths.some(isImportResolverConfig);
   const importAnalysisPaths = importResolutionContextChanged
     ? currentInventory
-    : sorted([...filesToReanalyze, ...missingImportEntries]);
+    : sorted([...currentChangedPaths, ...missingImportEntries]);
   const importMap = refreshImportMap({
     projectRoot,
     intermediateDir,
