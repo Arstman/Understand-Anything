@@ -24,6 +24,7 @@ import { dirname, basename, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -217,6 +218,14 @@ function relevantWorktreeChanges(projectRoot, excludePatterns) {
     if (name === '.gitignore' || name === '.understandignore') return true;
     return !ignoreFilter.isIgnored(path);
   });
+}
+
+function isTrackedSymlink(projectRoot, filePath) {
+  try {
+    return lstatSync(join(projectRoot, filePath)).isSymbolicLink();
+  } catch {
+    return false;
+  }
 }
 
 function normalizeFingerprintStore(raw, baseCommit) {
@@ -509,6 +518,15 @@ async function main() {
 
   const currentScanPath = join(intermediateDir, 'current-scan.json');
   const currentScan = runScan(projectRoot, currentScanPath, args.excludePatterns);
+  const scanFailures = Array.isArray(currentScan?.failures) ? currentScan.failures : [];
+  if (scanFailures.length > 0) {
+    const preview = scanFailures
+      .slice(0, 5)
+      .map(failure => `${failure.path ?? '<global>'} (${failure.stage})`)
+      .join(', ');
+    const suffix = scanFailures.length > 5 ? ` (+${scanFailures.length - 5} more)` : '';
+    throw new Error(`Project scan reported failures: ${preview}${suffix}`);
+  }
   const currentInventory = sorted(currentScan.files.map(file => file.path));
   const currentInventorySet = new Set(currentInventory);
   // If a previous attempt saved the graph but failed before fingerprints/meta,
@@ -521,6 +539,24 @@ async function main() {
   const inventoryGraph = graphMatchesUncommittedHead ? {} : graph;
   const oldInventory = inventoryFrom(baselineScan, inventoryGraph, oldFingerprints);
   const oldInventorySet = new Set(oldInventory);
+  const trackedPaths = new Set(parseNulPaths(run(
+    'git',
+    ['ls-files', '--cached', '-z', '--', '.'],
+    { cwd: projectRoot },
+  )));
+  const currentIgnoreFilter = createIgnoreFilter(projectRoot, args.excludePatterns);
+  const unexplainedMissingFiles = oldInventory.filter(path =>
+    !currentInventorySet.has(path)
+    && trackedPaths.has(path)
+    && !currentIgnoreFilter.isIgnored(path)
+    && !isTrackedSymlink(projectRoot, path),
+  );
+  if (unexplainedMissingFiles.length > 0) {
+    throw new Error(
+      `Project scan omitted tracked, non-ignored files: ` +
+      `${unexplainedMissingFiles.slice(0, 10).join(', ')}. Baseline not advanced.`,
+    );
+  }
 
   const generatedArtifactFiles = sorted(diffPaths.filter(isGeneratedArtifact));
   const nonGeneratedDiffPaths = diffPaths.filter(path => !isGeneratedArtifact(path));

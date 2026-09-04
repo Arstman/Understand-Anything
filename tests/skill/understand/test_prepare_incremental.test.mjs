@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -664,6 +665,35 @@ describe('prepare-incremental.mjs', { timeout: 30_000 }, () => {
 
     const { plan } = prepare(root, baseCommit);
     expect(plan.filesToReanalyze).toEqual(['src/a.ts']);
+  });
+
+  it('aborts rather than treating a transient scan read failure as deletion', () => {
+    if (process.platform === 'win32' || (process.getuid && process.getuid() === 0)) return;
+    const { root, baseCommit } = setupRepository({
+      'src/a.ts': 'export const a = 1;\n',
+      'src/b.ts': 'export const b = 2;\n',
+      'src/c.ts': 'export const c = 3;\n',
+      'src/d.ts': 'export const d = 4;\n',
+    });
+    const graphPath = join(root, '.ua', 'knowledge-graph.json');
+    const metaPath = join(root, '.ua', 'meta.json');
+    const graphBefore = readFileSync(graphPath, 'utf-8');
+    const metaBefore = readFileSync(metaPath, 'utf-8');
+    writeProjectFile(root, 'src/a.ts', 'export const renamed = 1;\n');
+    commit(root, 'committed structural change');
+    chmodSync(join(root, 'src/b.ts'), 0o000);
+
+    const result = spawnSync(process.execPath, [prepareScript, root, baseCommit], {
+      cwd: root,
+      encoding: 'utf-8',
+    });
+    chmodSync(join(root, 'src/b.ts'), 0o644);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(
+      /(?:Project scan reported failures|Working tree has relevant uncommitted changes): src\/b\.ts/,
+    );
+    expect(readFileSync(graphPath, 'utf-8')).toBe(graphBefore);
+    expect(readFileSync(metaPath, 'utf-8')).toBe(metaBefore);
   });
 });
 
