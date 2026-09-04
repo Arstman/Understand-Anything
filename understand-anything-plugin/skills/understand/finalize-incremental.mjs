@@ -315,6 +315,20 @@ function advanceMeta(uaDir, plan, analyzedFiles) {
   });
 }
 
+function projectMetadata(previousProject, plan, scan) {
+  const languages = [...new Set(
+    (scan.files ?? [])
+      .map(file => file?.language)
+      .filter(language => typeof language === 'string' && language.length > 0),
+  )].sort();
+  return {
+    ...(previousProject ?? {}),
+    languages,
+    analyzedAt: new Date().toISOString(),
+    gitCommitHash: plan.headCommit,
+  };
+}
+
 function main() {
   const args = process.argv.slice(2);
   if (args.length !== 1 || args[0].startsWith('--')) {
@@ -339,8 +353,21 @@ function main() {
     return;
   }
 
+  const graphPath = join(uaDir, 'knowledge-graph.json');
+
+  if (plan.action === 'SKIP') {
+    const previousGraph = readJson(graphPath);
+    if (!previousGraph || !Array.isArray(previousGraph.nodes) || !Array.isArray(previousGraph.edges)) {
+      throw new Error('knowledge-graph.json is missing or invalid; baseline not advanced');
+    }
+    atomicWriteJson(graphPath, {
+      ...previousGraph,
+      project: projectMetadata(previousGraph.project, plan, scan),
+    });
+  }
+
   if (plan.action !== 'SKIP') {
-    const previousGraph = readJson(join(uaDir, 'knowledge-graph.json'), {});
+    const previousGraph = readJson(graphPath, {});
     const assembledRaw = readJson(join(intermediateDir, 'assembled-graph.json'));
     if (!assembledRaw || !Array.isArray(assembledRaw.nodes) || !Array.isArray(assembledRaw.edges)) {
       throw new Error('assembled-graph.json is missing or invalid; baseline not advanced');
@@ -372,9 +399,8 @@ function main() {
       ...previousGraph,
       version: previousGraph.version ?? '1.0.0',
       project: {
-        ...(previousGraph.project ?? {}),
+        ...projectMetadata(previousGraph.project, plan, scan),
         analyzedAt: now,
-        gitCommitHash: plan.headCommit,
       },
       nodes: assembled.nodes,
       edges: assembled.edges,
@@ -384,7 +410,7 @@ function main() {
 
     // Ordering is intentional: a failed graph save must never advance the
     // structural baseline and hide the failed update from the next run.
-    atomicWriteJson(join(uaDir, 'knowledge-graph.json'), graph);
+    atomicWriteJson(graphPath, graph);
   }
 
   patchFingerprints(uaDir, plan, patch);

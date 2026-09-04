@@ -433,9 +433,14 @@ describe('prepare-incremental.mjs', { timeout: 30_000 }, () => {
     const fingerprints = JSON.parse(
       readFileSync(join(root, '.ua', 'fingerprints.json'), 'utf-8'),
     );
+    const graph = JSON.parse(
+      readFileSync(join(root, '.ua', 'knowledge-graph.json'), 'utf-8'),
+    );
     expect(meta.gitCommitHash).toBe(headCommit);
     expect(fingerprints.gitCommitHash).toBe(headCommit);
     expect(Object.keys(fingerprints.files)).toHaveLength(4);
+    expect(graph.project.gitCommitHash).toBe(headCommit);
+    expect(graph.project.analyzedAt).not.toBe('2026-01-01T00:00:00.000Z');
   });
 
   it('removes files newly covered by .understandignore without analyzing them', () => {
@@ -656,6 +661,61 @@ describe('finalize-incremental.mjs', { timeout: 30_000 }, () => {
     expect(readFileSync(graphPath, 'utf-8')).toBe(graphBefore);
     expect(readFileSync(fingerprintPath, 'utf-8')).toBe(fingerprintsBefore);
     expect(readFileSync(metaPath, 'utf-8')).toBe(metaBefore);
+  });
+
+  it('adds a newly introduced language to graph project metadata', () => {
+    const { root, baseCommit } = setupRepository({
+      'src/a.ts': 'export const a = 1;\n',
+      'src/b.ts': 'export const b = 2;\n',
+      'src/c.ts': 'export const c = 3;\n',
+      'src/d.ts': 'export const d = 4;\n',
+    });
+    writeProjectFile(root, 'src/script.py', 'value = 1\n');
+    commit(root, 'add first python file');
+    prepare(root, baseCommit);
+
+    const intermediate = join(root, '.ua', 'intermediate');
+    const retained = JSON.parse(readFileSync(join(intermediate, 'batch-existing.json'), 'utf-8'));
+    writeFileSync(
+      join(intermediate, 'assembled-graph.json'),
+      JSON.stringify({
+        nodes: [
+          ...retained.nodes,
+          {
+            id: 'file:src/script.py',
+            type: 'file',
+            name: 'script.py',
+            filePath: 'src/script.py',
+            summary: 'Python script',
+            tags: ['python'],
+            complexity: 'simple',
+          },
+        ],
+        edges: retained.edges,
+      }),
+      'utf-8',
+    );
+    run(process.execPath, [finalizeScript, root], root);
+
+    const graph = JSON.parse(readFileSync(join(root, '.ua', 'knowledge-graph.json'), 'utf-8'));
+    expect(graph.project.languages).toEqual(['python', 'typescript']);
+  });
+
+  it('removes a language from graph metadata when its last file is deleted', () => {
+    const { root, baseCommit } = setupRepository({
+      'src/a.ts': 'export const a = 1;\n',
+      'src/b.ts': 'export const b = 2;\n',
+      'src/c.ts': 'export const c = 3;\n',
+      'src/script.py': 'value = 1\n',
+    });
+    unlinkSync(join(root, 'src/script.py'));
+    commit(root, 'remove last python file');
+    prepare(root, baseCommit);
+    run(python, [mergeScript, root], root);
+    run(process.execPath, [finalizeScript, root], root);
+
+    const graph = JSON.parse(readFileSync(join(root, '.ua', 'knowledge-graph.json'), 'utf-8'));
+    expect(graph.project.languages).toEqual(['typescript']);
   });
 
   it('does not advance the baseline when analyzer output omits a changed file node', () => {
