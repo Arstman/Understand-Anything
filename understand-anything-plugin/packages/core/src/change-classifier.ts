@@ -128,7 +128,8 @@ function detectDirectoryChanges(
 function topDirectories(files: Iterable<string>): Set<string> {
   const dirs = new Set<string>();
   for (const file of files) {
-    const dir = topDirectory(file.replaceAll("\\", "/"));
+    const platformPath = process.platform === "win32" ? file.replaceAll("\\", "/") : file;
+    const dir = topDirectory(platformPath);
     if (dir) dirs.add(dir);
   }
   return dirs;

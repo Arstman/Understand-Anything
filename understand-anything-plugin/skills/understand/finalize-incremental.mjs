@@ -71,7 +71,8 @@ function atomicWriteJson(path, value) {
 
 function normalizeRelativePath(value) {
   if (typeof value !== 'string' || !value || isAbsolute(value)) return null;
-  const path = value.replaceAll('\\', '/').replace(/^\.\//, '');
+  const platformPath = process.platform === 'win32' ? value.replaceAll('\\', '/') : value;
+  const path = platformPath.replace(/^\.\//, '');
   if (!path || path.split('/').some(part => part === '..')) return null;
   return path;
 }

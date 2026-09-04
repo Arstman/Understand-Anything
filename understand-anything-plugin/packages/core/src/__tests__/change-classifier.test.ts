@@ -143,6 +143,22 @@ describe("classifyUpdate", () => {
     expect(decision.action).toBe("PARTIAL_UPDATE");
   });
 
+  it.skipIf(process.platform === "win32")(
+    "does not treat a literal POSIX backslash as a directory separator",
+    () => {
+      const analysis = makeAnalysis({ newFiles: ["foo\\bar.js"] });
+
+      const decision = classifyUpdate(
+        analysis,
+        20,
+        ["index.js"],
+        ["index.js", "foo\\bar.js"],
+      );
+
+      expect(decision.action).toBe("PARTIAL_UPDATE");
+    },
+  );
+
   it("does NOT trigger ARCHITECTURE_UPDATE for new file in existing directory", () => {
     const analysis = makeAnalysis({
       newFiles: ["src/newfile.ts"],

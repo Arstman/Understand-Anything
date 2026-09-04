@@ -111,7 +111,7 @@ describe('extract-import-map.mjs — TypeScript / JavaScript resolver', () => {
         { path: 'src/stable.ts', language: 'typescript', fileCategory: 'code' },
         { path: 'src/untouched.ts', language: 'typescript', fileCategory: 'code' },
       ],
-      analysisPaths: ['src\\changed.ts'],
+      analysisPaths: [process.platform === 'win32' ? 'src\\changed.ts' : 'src/changed.ts'],
     });
 
     expect(result.status, result.stderr).toBe(0);
@@ -159,6 +159,26 @@ describe('extract-import-map.mjs — TypeScript / JavaScript resolver', () => {
     expect(result.output.importMap).toEqual({});
     expect(result.output.stats.filesScanned).toBe(0);
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'preserves literal backslashes in POSIX filenames',
+    () => {
+      projectRoot = setupTree({
+        'src/foo\\bar.js': 'module.exports = 1;\n',
+      });
+
+      const result = runScript(projectRoot, {
+        projectRoot,
+        files: [
+          { path: 'src/foo\\bar.js', language: 'javascript', fileCategory: 'code' },
+        ],
+        analysisPaths: ['src/foo\\bar.js'],
+      });
+
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.output.importMap).toEqual({ 'src/foo\\bar.js': [] });
+    },
+  );
 
   it('orders Unicode import targets by locale-independent UTF-16 code units', () => {
     projectRoot = setupTree({

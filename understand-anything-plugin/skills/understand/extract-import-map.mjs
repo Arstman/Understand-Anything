@@ -99,7 +99,8 @@ const { TreeSitterPlugin, PluginRegistry, builtinLanguageConfigs, registerAllPar
  * cross-platform.
  */
 function toPosix(p) {
-  return p.split(/[\\/]/).filter(Boolean).join('/');
+  const separators = process.platform === 'win32' ? /[\\/]/ : /\//;
+  return p.split(separators).filter(Boolean).join('/');
 }
 
 /**

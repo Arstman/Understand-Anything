@@ -82,7 +82,8 @@ function sorted(values) {
 
 function normalizeRelativePath(value) {
   if (typeof value !== 'string' || value.length === 0 || isAbsolute(value)) return null;
-  const posix = value.replaceAll('\\', '/').replace(/^\.\//, '');
+  const platformPath = process.platform === 'win32' ? value.replaceAll('\\', '/') : value;
+  const posix = platformPath.replace(/^\.\//, '');
   if (!posix || posix.split('/').some(part => part === '..')) return null;
   return posix;
 }

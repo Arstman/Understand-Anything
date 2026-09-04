@@ -576,6 +576,25 @@ describe('prepare-incremental.mjs', { timeout: 30_000 }, () => {
     expect(plan.filesToReanalyze).toEqual(['src/new name.ts']);
   });
 
+  it.skipIf(process.platform === 'win32')(
+    'preserves literal backslashes in POSIX project paths',
+    () => {
+      const literalPath = 'src/foo\\bar.js';
+      const { root, baseCommit } = setupRepository({
+        [literalPath]: 'function before() { return 1; }\nmodule.exports = before;\n',
+        'src/a.js': 'module.exports = 1;\n',
+        'src/b.js': 'module.exports = 2;\n',
+        'src/c.js': 'module.exports = 3;\n',
+      });
+      writeProjectFile(root, literalPath, 'function after() { return 1; }\nmodule.exports = after;\n');
+      commit(root, 'change literal backslash path');
+
+      const { plan, scan } = prepare(root, baseCommit);
+      expect(plan.filesToReanalyze).toEqual([literalPath]);
+      expect(scan.files.map(file => file.path)).toContain(literalPath);
+    },
+  );
+
   it('keeps the same new-directory decision when preparation is retried', () => {
     const { root, baseCommit } = setupRepository({
       'src/a.ts': 'export const a = 1;\n',
