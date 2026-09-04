@@ -18,8 +18,14 @@
  * Input JSON:
  *   {
  *     projectRoot: <abs-path>,
- *     files: [{ path, language, fileCategory }, ...]
+ *     files: [{ path, language, fileCategory }, ...],
+ *     analysisPaths?: [<project-relative-path>, ...]
  *   }
+ *
+ * `files` is always the complete current inventory because import resolution
+ * needs it for path/module probes. When `analysisPaths` is present, only those
+ * files are read and emitted in `importMap`; omitting it preserves the original
+ * full-scan behaviour.
  *
  * Output JSON:
  *   {
@@ -94,6 +100,50 @@ const { TreeSitterPlugin, PluginRegistry, builtinLanguageConfigs, registerAllPar
  */
 function toPosix(p) {
   return p.split(/[\\/]/).filter(Boolean).join('/');
+}
+
+/**
+ * Validate and normalize the optional selective-analysis path list. Keeping
+ * this strict prevents an incremental caller from accidentally asking the
+ * extractor to read outside projectRoot or silently miss a typo.
+ */
+function selectAnalysisFiles(files, analysisPaths) {
+  if (analysisPaths === undefined) return files;
+  if (!Array.isArray(analysisPaths)) {
+    throw new Error('Invalid input: analysisPaths must be an array when provided');
+  }
+
+  const filesByPath = new Map();
+  for (const file of files) {
+    if (!file || typeof file.path !== 'string' || file.path.length === 0) {
+      throw new Error('Invalid input: every files entry must contain a non-empty path');
+    }
+    filesByPath.set(toPosix(file.path), file);
+  }
+
+  const selected = [];
+  const seen = new Set();
+  for (const rawPath of analysisPaths) {
+    if (typeof rawPath !== 'string' || rawPath.length === 0) {
+      throw new Error('Invalid input: every analysisPaths entry must be a non-empty string');
+    }
+    if (/^(?:[A-Za-z]:[\\/]|[\\/])/.test(rawPath)) {
+      throw new Error(`Invalid input: analysisPaths entry must be project-relative: ${rawPath}`);
+    }
+    const path = toPosix(rawPath);
+    if (!path || path.split('/').some(part => part === '..')) {
+      throw new Error(`Invalid input: analysisPaths entry escapes projectRoot: ${rawPath}`);
+    }
+    const file = filesByPath.get(path);
+    if (!file) {
+      throw new Error(`Invalid input: analysisPaths entry is not present in files: ${rawPath}`);
+    }
+    if (!seen.has(path)) {
+      seen.add(path);
+      selected.push(file);
+    }
+  }
+  return selected;
 }
 
 // ECMAScript relational string comparison is lexicographic over UTF-16 code
@@ -1806,10 +1856,25 @@ async function main() {
 
   const inputRaw = readFileSync(inputPath, 'utf-8');
   const input = JSON.parse(inputRaw);
-  const { projectRoot, files } = input;
+  const { projectRoot, files, analysisPaths } = input;
 
   if (!projectRoot || !Array.isArray(files)) {
     throw new Error('Invalid input: must contain projectRoot and files array');
+  }
+
+  const analysisFiles = selectAnalysisFiles(files, analysisPaths);
+
+  if (analysisFiles.length === 0) {
+    const output = {
+      scriptCompleted: true,
+      stats: { filesScanned: 0, filesWithImports: 0, totalEdges: 0 },
+      importMap: {},
+    };
+    writeFileSync(outputPath, JSON.stringify(output, null, 2), 'utf-8');
+    process.stderr.write(
+      'extract-import-map: filesScanned=0 filesWithImports=0 totalEdges=0\n',
+    );
+    return;
   }
 
   // Create tree-sitter plugin with all configs that have WASM grammars.
@@ -1848,7 +1913,7 @@ async function main() {
   let filesWithImports = 0;
   let totalEdges = 0;
 
-  for (const file of files) {
+  for (const file of analysisFiles) {
     const path = toPosix(file.path);
 
     // Non-code files always get an empty array
@@ -1941,7 +2006,7 @@ async function main() {
   const output = {
     scriptCompleted: true,
     stats: {
-      filesScanned: files.length,
+      filesScanned: analysisFiles.length,
       filesWithImports,
       totalEdges,
     },
@@ -1955,7 +2020,7 @@ async function main() {
   }
 
   process.stderr.write(
-    `extract-import-map: filesScanned=${files.length} ` +
+    `extract-import-map: filesScanned=${analysisFiles.length} ` +
     `filesWithImports=${filesWithImports} totalEdges=${totalEdges}\n`,
   );
 }

@@ -97,6 +97,69 @@ describe('extract-import-map.mjs — TypeScript / JavaScript resolver', () => {
     expect(result.output.stats.totalEdges).toBe(2);
   });
 
+  it('uses the full inventory for resolution while emitting only analysisPaths', () => {
+    projectRoot = setupTree({
+      'src/changed.ts': `import { stable } from './stable';\nexport const changed = stable;\n`,
+      'src/stable.ts': `export const stable = 1;\n`,
+      'src/untouched.ts': `import './stable';\n`,
+    });
+
+    const result = runScript(projectRoot, {
+      projectRoot,
+      files: [
+        { path: 'src/changed.ts', language: 'typescript', fileCategory: 'code' },
+        { path: 'src/stable.ts', language: 'typescript', fileCategory: 'code' },
+        { path: 'src/untouched.ts', language: 'typescript', fileCategory: 'code' },
+      ],
+      analysisPaths: ['src\\changed.ts'],
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.output.importMap).toEqual({
+      'src/changed.ts': ['src/stable.ts'],
+    });
+    expect(result.output.stats).toEqual({
+      filesScanned: 1,
+      filesWithImports: 1,
+      totalEdges: 1,
+    });
+  });
+
+  it('rejects analysisPaths that are absent from the current inventory', () => {
+    projectRoot = setupTree({
+      'src/index.ts': 'export const value = 1;\n',
+    });
+
+    const result = runScript(projectRoot, {
+      projectRoot,
+      files: [
+        { path: 'src/index.ts', language: 'typescript', fileCategory: 'code' },
+      ],
+      analysisPaths: ['src/missing.ts'],
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('analysisPaths entry is not present in files');
+  });
+
+  it('supports an empty analysisPaths list without emitting full-scan entries', () => {
+    projectRoot = setupTree({
+      'src/index.ts': 'export const value = 1;\n',
+    });
+
+    const result = runScript(projectRoot, {
+      projectRoot,
+      files: [
+        { path: 'src/index.ts', language: 'typescript', fileCategory: 'code' },
+      ],
+      analysisPaths: [],
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.output.importMap).toEqual({});
+    expect(result.output.stats.filesScanned).toBe(0);
+  });
+
   it('orders Unicode import targets by locale-independent UTF-16 code units', () => {
     projectRoot = setupTree({
       'src/index.ts': `import './ä';\nimport './Z';\nimport './a';\n`,
